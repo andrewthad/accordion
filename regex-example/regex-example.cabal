@@ -1,0 +1,12 @@
+name: regex-example
+version: 0.1.0.0
+build-type: Simple
+cabal-version: >= 1.25
+
+executable regex-example
+  main-is:             Main.hs
+  build-depends:       base, regex-indef, str-string, str-bytestring, regex-types
+  mixins:              regex-indef (Regex as Regex.String)
+                          requires (Str as Str.String),
+                       regex-indef (Regex as Regex.ByteString)
+                          requires (Str as Str.ByteString)

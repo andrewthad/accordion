@@ -1,0 +1,13 @@
+cabal-version: 2.2
+name: accordion-indefinite
+version: 0.1.0.0
+build-type: Simple
+
+library
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , accordion-types
+  exposed-modules: Accordion.Record
+  signatures: Accordion.Universe
+  default-language: Haskell2010
+  hs-source-dirs: src

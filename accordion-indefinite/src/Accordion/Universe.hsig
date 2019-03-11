@@ -1,0 +1,11 @@
+{-# language DataKinds #-}
+{-# language KindSignatures #-}
+{-# language TypeFamilies #-}
+
+signature Accordion.Universe where
+
+import Accordion.Types (Nat,Vec)
+import Data.Kind (Type)
+
+data Height :: Nat
+data Interpret :: Vec Height Bool -> Type
