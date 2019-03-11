@@ -10,3 +10,6 @@ library
   default-language: Haskell2010
   exposed-modules:
     Accordion.Types
+    Accordion.Nat
+    Accordion.Fin.N5
+    Accordion.Gte.N2
