@@ -2,34 +2,62 @@
 {-# language GADTs #-}
 {-# language KindSignatures #-}
 {-# language PolyKinds #-}
+{-# language RankNTypes #-}
 {-# language TypeFamilies #-}
 {-# language TypeInType #-}
 
 module Accordion.Record
-  ( Record(..)
-  , Tree(..)
+  ( -- Data types
+    Record(..)
+  , Field(..)
+    -- Functions
   , singleton
+  , leftUnion
+    -- Type families
+  , Singleton
+  , Union
   ) where
 
-import Accordion.Types (Nat(..),Set(..),Vec(..),Optional(..))
-import Accordion.Universe (Height,Interpret)
+import Accordion.Types (Nat(..),Vec(..),Optional(..),SetFin(..),Finger(..))
+import Accordion.Types (Tree(..),Gte(GteEq,GteGt),Shown(..),Omnitree(..))
+import Accordion.Universe (Height,Interpret,interpretShow)
 import Data.Kind (Type)
+import qualified Accordion.Types as A
 
-newtype Record :: Set Height -> Type where
-  Record :: Tree Height s 'Zero 'VecNil -> Record s
+newtype Record :: SetFin Height 'Zero -> Type where
+  Record :: Tree Height 'Zero Interpret s 'VecNil -> Record s
 
-data Tree (h :: Nat) (s :: Set h) (p :: Nat) (v :: Vec p Bool) where
-  TreeLeaf ::
-       Optional b (Interpret v)
-    -> Tree 'Zero ('SetLeaf b) Height v
-  TreeBranch ::
-       Tree h sl ('Succ p) ('VecCons False v)
-    -> Tree h sr ('Succ p) ('VecCons True v)
-    -> Tree ('Succ h) ('SetBranch sl sr) p v
+instance Show (Record s) where
+  show (Record t) = showTree interpretShow t "empty"
 
--- singleton :: Interpret v -> Record s
+-- TODO: At the least, we should probably have a general function
+-- for pairing an Omnitree and a tree that lives in Accordion.Types.
+-- TODO: Fix the missing case warnings. It is not actually possible
+-- to take these paths, but we need to help GHC out with Void/absurd.
+showTree ::
+     Omnitree Height n (Shown (Vec Height Bool) Interpret) v
+  -> Tree Height n Interpret s v
+  -> String
+  -> String
+showTree (OmnitreeLeaf (Shown f)) (TreeLeaf (Present x)) s = f x ++ " :> " ++ s
+showTree (OmnitreeLeaf _) (TreeLeaf Absent) s = s
+showTree (OmnitreeBranch oml omr) (TreeBranch dl dr) s = showTree oml dl (showTree omr dr s)
 
--- type family Singleton (h :: Fin Height) (v :: Vec h Bool) (x :: Set p) :: Set Height where
---   Singleton 'Zero p 'VecNil s = s
---   Singleton ('Succ h) p ('VecCons 'False v) s =
---     Singleton h ('Succ p) v (SetBranch s (Empty p))
+newtype Field :: Vec Height Bool -> Type where
+  Field :: forall (v :: Vec Height Bool). Finger Height v -> Field v
+
+type Singleton (v :: Vec Height Bool) =
+  A.Singleton Height Height v ('SetFinLeaf 'True) 'GteEq
+
+type Union (rs :: SetFin Height 'Zero) (ss :: SetFin Height 'Zero) =
+  A.Union Height 'Zero rs ss
+
+singleton ::
+     Field v
+  -> Interpret v
+  -> Record (Singleton v)
+singleton (Field finger) value =
+  Record (A.singleton A.SingGteEq finger finger value (A.TreeLeaf (Present value)))
+
+leftUnion :: Record rs -> Record ss -> Record (Union rs ss)
+leftUnion (Record xs) (Record ys) = Record (A.leftUnion xs ys)

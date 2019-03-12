@@ -4,8 +4,11 @@
 
 signature Accordion.Universe where
 
-import Accordion.Types (Nat,Vec)
+import Accordion.Types (Nat(..),Shown,Vec(..),Omnitree)
 import Data.Kind (Type)
 
 data Height :: Nat
 data Interpret :: Vec Height Bool -> Type
+
+interpretShow :: Omnitree Height 'Zero (Shown (Vec Height Bool) Interpret) 'VecNil
+

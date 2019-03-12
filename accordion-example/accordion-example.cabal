@@ -1,0 +1,27 @@
+cabal-version: 2.2
+name: accordion-example
+version: 0.1.0.0
+build-type: Simple
+
+library universe
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , accordion-types
+  exposed-modules:
+    Accordion.Example.Universe
+    Accordion.Example.Types
+  default-language: Haskell2010
+  hs-source-dirs: src-universe
+
+library
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , accordion-types
+    , accordion-indefinite
+    , universe
+  hs-source-dirs: src
+  exposed-modules:
+    Accordion.Example
+  mixins:
+    accordion-indefinite (Accordion.Record as Accordion.Example.Record)
+      requires (Accordion.Universe as Accordion.Example.Universe)
