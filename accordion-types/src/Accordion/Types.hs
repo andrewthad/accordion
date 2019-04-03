@@ -19,7 +19,6 @@ module Accordion.Types
   , Vec(..)
   , Set(..)
   , SetFin(..)
-  , Optional(..)
   , Tree(..)
   , Omnitree(..)
   , Finger(..)
@@ -30,7 +29,6 @@ module Accordion.Types
   , Empty
   , Union
   , Singleton
-  , SetFinToGte
     -- functions
   , leftUnion
   , singleton
@@ -67,15 +65,12 @@ data Set :: Nat -> Type where
 -- * n = 0: This node is the root node of a set.
 -- * n = h: This node is a leaf node.
 data SetFin (h :: Nat) (n :: Nat) where
-  SetFinLeaf :: Bool -> SetFin h h
+  SetFinLeaf :: SetFin h h
   SetFinBranch :: SetFin h ('Succ n) -> SetFin h ('Succ n) -> SetFin h n
+  SetFinLeft :: SetFin h ('Succ n) -> SetFin h n
+  SetFinRight :: SetFin h ('Succ n) -> SetFin h n
+  SetFinEmpty :: SetFin h 'Zero
 
--- TODO: Get rid of Optional. This will have to wait until Tree is
--- refactored to prune empty branches. Then, all leaves will have
--- values.
-data Optional :: Bool -> Type -> Type where
-  Absent :: Optional 'False a
-  Present :: a -> Optional 'True a
 -- Consider inlining SingBool into the FingerCons data constructor.
 -- This could improve performance but needs to be benchmarked.
 data Finger (n :: Nat) (v :: Vec n Bool) where
@@ -103,12 +98,19 @@ data SingGte (m :: Nat) (n :: Nat) (gt :: Gte m n) where
 -- function applied to the finger into the tree (Vec h Bool).
 data Tree (h :: Nat) (n :: Nat) (i :: Vec h Bool -> Type) (s :: SetFin h n) (v :: Vec n Bool) where
   TreeLeaf ::
-       Optional b (i v)
-    -> Tree h h i ('SetFinLeaf b) v
+       i v
+    -> Tree h h i 'SetFinLeaf v
+  TreeLeft ::
+       Tree h ('Succ n) i sl ('VecCons 'False v)
+    -> Tree h n i ('SetFinLeft sl) v
+  TreeRight ::
+       Tree h ('Succ n) i s ('VecCons 'True v)
+    -> Tree h n i ('SetFinRight s) v
   TreeBranch ::
        Tree h ('Succ n) i sl ('VecCons 'False v)
     -> Tree h ('Succ n) i sr ('VecCons 'True v)
     -> Tree h n i ('SetFinBranch sl sr) v
+  TreeEmpty :: Tree h 'Zero i 'SetFinEmpty 'VecNil
 
 -- This is like Tree except that every element is present. It is not
 -- parameterized by a Set since everything is present, but each leaf
@@ -131,11 +133,11 @@ data Omnitree (h :: Nat) (n :: Nat) (i :: Vec h Bool -> Type) (v :: Vec n Bool) 
 -- is not amenable to memoization. There ought to be a better way
 -- to do this that lets us cache an empty tree of each size without
 -- resorting to unsafeCoerce.
-empty :: forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (gt :: Gte h n) (i :: Vec h Bool -> Type).
-     SingGte h n gt
-  -> Tree h n i (Empty h n gt w) w
-empty SingGteEq = TreeLeaf Absent
-empty (SingGteGt sgt) = TreeBranch (empty sgt) (empty sgt)
+
+
+empty :: forall (h :: Nat) (i :: Vec h Bool -> Type).
+  Tree h 'Zero i 'SetFinEmpty 'VecNil
+empty = TreeEmpty
 
 -- emptyLeft :: forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: SetFin h ('Succ n)) (i :: Vec h Bool -> Type).
 --      Tree h ('Succ n) i s ('VecCons 'False w)
@@ -178,20 +180,35 @@ singleton :: forall (h :: Nat) (n :: Nat) (v :: Vec h Bool) (w :: Vec n Bool) (s
   -> Tree h 'Zero i (Singleton h n w s gt) 'VecNil
 singleton _ FingerNil _ _ s = s
 singleton sgt (FingerCons b bs) v e s = case b of
-  SingFalse -> singleton (SingGteGt sgt) bs v e (TreeBranch s (empty sgt))
-  SingTrue -> singleton (SingGteGt sgt) bs v e (TreeBranch (empty sgt) s)
+  SingFalse -> singleton (SingGteGt sgt) bs v e (TreeLeft s)
+  SingTrue -> singleton (SingGteGt sgt) bs v e (TreeRight s)
 
 -- Left-biased union.
 leftUnion :: forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: SetFin h n) (s :: SetFin h n) (i :: Vec h Bool -> Type).
      Tree h n i r w
   -> Tree h n i s w
   -> Tree h n i (Union h n r s) w
-leftUnion (TreeLeaf x) (TreeLeaf y) = case x of
-  Present v -> TreeLeaf (Present v)
-  Absent -> TreeLeaf y
+leftUnion TreeEmpty t = t
+leftUnion (TreeLeaf x) TreeEmpty = TreeLeaf x
+leftUnion (TreeLeaf x) (TreeLeaf _) = TreeLeaf x
+leftUnion (TreeLeft x) (TreeLeft y) = TreeLeft (leftUnion x y)
+leftUnion (TreeBranch xl xr) (TreeRight yr) = TreeBranch xl (leftUnion xr yr)
+leftUnion (TreeBranch xl xr) (TreeLeft yl) = TreeBranch (leftUnion xl yl) xr
 leftUnion (TreeBranch xl xr) (TreeBranch yl yr) = TreeBranch (leftUnion xl yl) (leftUnion xr yr)
+leftUnion (TreeLeft xl) (TreeBranch yl yr) = TreeBranch (leftUnion xl yl) yr
+leftUnion (TreeRight xr) (TreeBranch yl yr) = TreeBranch yl (leftUnion xr yr)
+leftUnion (TreeRight x) (TreeRight y) = TreeRight (leftUnion x y)
 leftUnion (TreeLeaf _) (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeBranch t _) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeBranch xl xr) TreeEmpty = TreeBranch xl xr
+leftUnion (TreeLeft x) TreeEmpty = TreeLeft x
+leftUnion (TreeRight x) TreeEmpty = TreeRight x
+leftUnion (TreeLeft x) (TreeRight y) = TreeBranch x y
+leftUnion (TreeRight x) (TreeLeft y) = TreeBranch y x
+leftUnion (TreeLeft t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 
 impossibleGte :: forall (m :: Nat). Gte m ('Succ m) -> Void
 impossibleGte (GteGt g) = impossibleGte (predGte g)
@@ -200,9 +217,11 @@ predGte :: Gte m ('Succ n) -> Gte m n
 predGte GteEq = GteGt GteEq
 predGte (GteGt g) = GteGt (predGte g)
 
+-- Dang it. This function can no longer be written.
 treeToGte :: Tree h n i s v -> Gte h n
 treeToGte (TreeLeaf _) = GteEq
 treeToGte (TreeBranch t _) = GteGt (treeToGte t)
+treeToGte TreeEmpty = _
 
 -- This uses a non-linear pattern match. Might be bad. Not sure.
 -- I think the appropriate evidence will be brought into scope
@@ -218,10 +237,7 @@ treeToGte (TreeBranch t _) = GteGt (treeToGte t)
 --   Empty h n ('SetFinBranch bl br) = 'SetFinBranch (Empty h ('Succ n) bl) (Empty h ('Succ n) br)
 
 type family Empty (h :: Nat) (n :: Nat) (gt :: Gte h n) (v :: Vec n Bool) :: SetFin h n where
-  Empty h h 'GteEq bs = 'SetFinLeaf 'False
-  Empty h n ('GteGt gt) bs = 'SetFinBranch
-    (Empty h ('Succ n) gt ('VecCons 'False bs))
-    (Empty h ('Succ n) gt ('VecCons 'True bs))
+  Empty h h 'GteEq bs = 'SetFinLeaf
   
 -- type family Empty (h :: Nat) (n :: Nat) (x :: SetFin h n) :: SetFin h n where
 --   Empty h h ('SetFinLeaf _) = SetFinLeaf 'False
@@ -233,25 +249,30 @@ type family Empty (h :: Nat) (n :: Nat) (gt :: Gte h n) (v :: Vec n Bool) :: Set
 --   Empty h h ('SetFinLeaf _) = SetFinLeaf 'False
 --   Empty ('Succ h) n ('SetFinBranch s _) = Duplicate ('Succ h) ('Succ n) (Empty ('Succ h) ('Succ n) s) -- SetFinBranch (Empty h ('Succ n)) (Empty h ('Succ n))
 
--- TODO: Eliminate the need for this by inlining this deconstruction into
--- the type family Empty. This will make it easier to write functions
--- that work at the value level, and they will perform better since they
--- will not need to allocate evidence.
-type family SetFinToGte (h :: Nat) (n :: Nat) (s :: SetFin h n) :: Gte h n where
-  SetFinToGte h h ('SetFinLeaf b) = 'GteEq
-  SetFinToGte h n ('SetFinBranch s _) = 'GteGt (SetFinToGte h ('Succ n) s)
-
 -- Construct a singleton set. One leaf is true and all others
 -- are false.
 type family Singleton (h :: Nat) (n :: Nat) (v :: Vec n Bool) (x :: SetFin h n) (gt :: Gte h n) :: SetFin h 'Zero where
   Singleton h 'Zero 'VecNil s gt = s
   Singleton h ('Succ n) ('VecCons 'False v) s gt =
-    Singleton h n v ('SetFinBranch s (Empty h ('Succ n) gt ('VecCons 'True v))) ('GteGt gt)
+    Singleton h n v ('SetFinLeft s) ('GteGt gt)
   Singleton h ('Succ n) ('VecCons 'True v) s gt =
-    Singleton h n v ('SetFinBranch (Empty h ('Succ n) gt ('VecCons 'False v)) s) ('GteGt gt)
+    Singleton h n v ('SetFinRight s) ('GteGt gt)
 
 type family Union (h :: Nat) (n :: Nat) (x :: SetFin h n) (y :: SetFin h n) :: SetFin h n where
-  Union h h ('SetFinLeaf x) ('SetFinLeaf y) = 'SetFinLeaf (Or x y)
+  Union h h 'SetFinLeaf 'SetFinLeaf = 'SetFinLeaf
+  Union 'Zero 'Zero 'SetFinLeaf 'SetFinEmpty = 'SetFinLeaf
+  Union h 'Zero 'SetFinEmpty s = s
+  Union h 'Zero ('SetFinLeft x) 'SetFinEmpty = 'SetFinLeft x
+  Union h n ('SetFinBranch xl xr) ('SetFinLeft yl) = 'SetFinBranch (Union h ('Succ n) xl yl) xr
+  Union h n ('SetFinBranch xl xr) ('SetFinRight yr) = 'SetFinBranch xl (Union h ('Succ n) xr yr)
+  Union h n ('SetFinLeft xl) ('SetFinBranch yl yr) = 'SetFinBranch (Union h ('Succ n) xl yl) yr
+  Union h n ('SetFinRight xr) ('SetFinBranch yl yr) = 'SetFinBranch yl (Union h ('Succ n) xr yr)
+  Union h n ('SetFinLeft x) ('SetFinLeft y) = 'SetFinLeft (Union h ('Succ n) x y)
+  Union h n ('SetFinLeft x) ('SetFinRight y) = 'SetFinBranch x y
+  Union h n ('SetFinRight x) ('SetFinRight y) = 'SetFinRight (Union h ('Succ n) x y)
+  Union h n ('SetFinRight x) ('SetFinLeft y) = 'SetFinBranch y x
+  Union h 'Zero ('SetFinRight x) 'SetFinEmpty = 'SetFinRight x
+  Union h 'Zero ('SetFinBranch xl xr) 'SetFinEmpty = 'SetFinBranch xl xr
   Union h n ('SetFinBranch xl xr) ('SetFinBranch yl yr) = 'SetFinBranch (Union h ('Succ n) xl yl) (Union h ('Succ n) xr yr)
 
 type family Or (x :: Bool) (y :: Bool) :: Bool where
