@@ -18,8 +18,8 @@ module Accordion.Record
   , Union
   ) where
 
-import Accordion.Types (Nat(..),Vec(..),Optional(..),SetFin(..),Finger(..))
-import Accordion.Types (Tree(..),Gte(GteEq,GteGt),Shown(..),Omnitree(..))
+import Accordion.Types (Nat(..),Vec(..),SetFin(..),Finger(..))
+import Accordion.Types (Tree(..),Gte(GteEq),Shown(..),Omnitree(..))
 import Accordion.Universe (Height,Interpret,interpretShow)
 import Data.Kind (Type)
 import qualified Accordion.Types as A
@@ -39,15 +39,17 @@ showTree ::
   -> Tree Height n Interpret s v
   -> String
   -> String
-showTree (OmnitreeLeaf (Shown f)) (TreeLeaf (Present x)) s = f x ++ " :> " ++ s
-showTree (OmnitreeLeaf _) (TreeLeaf Absent) s = s
+showTree (OmnitreeLeaf (Shown f)) (TreeLeaf x) s = f x ++ " :> " ++ s
 showTree (OmnitreeBranch oml omr) (TreeBranch dl dr) s = showTree oml dl (showTree omr dr s)
+showTree (OmnitreeBranch oml _) (TreeLeft dl) s = showTree oml dl s
+showTree (OmnitreeBranch _ omr) (TreeRight dr) s = showTree omr dr s
+showTree (OmnitreeBranch _ _) TreeEmpty s = s
 
 newtype Field :: Vec Height Bool -> Type where
   Field :: forall (v :: Vec Height Bool). Finger Height v -> Field v
 
 type Singleton (v :: Vec Height Bool) =
-  A.Singleton Height Height v ('SetFinLeaf 'True) 'GteEq
+  A.Singleton Height Height v 'SetFinLeaf 'GteEq
 
 type Union (rs :: SetFin Height 'Zero) (ss :: SetFin Height 'Zero) =
   A.Union Height 'Zero rs ss
@@ -57,7 +59,7 @@ singleton ::
   -> Interpret v
   -> Record (Singleton v)
 singleton (Field finger) value =
-  Record (A.singleton A.SingGteEq finger finger value (A.TreeLeaf (Present value)))
+  Record (A.singleton A.SingGteEq finger finger value (A.TreeLeaf value))
 
 leftUnion :: Record rs -> Record ss -> Record (Union rs ss)
 leftUnion (Record xs) (Record ys) = Record (A.leftUnion xs ys)
