@@ -217,11 +217,11 @@ predGte :: Gte m ('Succ n) -> Gte m n
 predGte GteEq = GteGt GteEq
 predGte (GteGt g) = GteGt (predGte g)
 
--- Dang it. This function can no longer be written.
-treeToGte :: Tree h n i s v -> Gte h n
+treeToGte :: Tree h ('Succ n) i s v -> Gte h ('Succ n)
 treeToGte (TreeLeaf _) = GteEq
 treeToGte (TreeBranch t _) = GteGt (treeToGte t)
-treeToGte TreeEmpty = _
+treeToGte (TreeLeft t) = GteGt (treeToGte t)
+treeToGte (TreeRight t) = GteGt (treeToGte t)
 
 -- This uses a non-linear pattern match. Might be bad. Not sure.
 -- I think the appropriate evidence will be brought into scope
