@@ -1,14 +1,57 @@
 {-# language DataKinds #-}
 {-# language KindSignatures #-}
 {-# language TypeFamilies #-}
+{-# language TypeOperators #-}
 
 signature Accordion.Universe where
 
-import Accordion.Types (Nat(..),Shown,Vec(..),Omnitree)
+import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger)
+import Control.Monad.ST (ST)
 import Data.Kind (Type)
+import Data.Type.Equality ((:~:))
+import Data.Primitive (MutablePrimArray,PrimArray)
+import Data.Word (Word8)
 
 data Height :: Nat
-data Interpret :: Vec Height Bool -> Type
+data Field :: Type
+data SingField :: Field -> Type
+data Universe :: Type
+data SingUniverse :: Universe -> Type
+type family Unindex (v :: Vec Height Bool) :: Field where ..
+type family Index (d :: Field) :: Vec Height Bool where ..
+type family Interpret (v :: Field) :: Universe where ..
+type family Ground (u :: Universe) :: Type where ..
+type family Vectorize (u :: Universe) :: Type where ..
 
-interpretShow :: Omnitree Height 'Zero (Shown (Vec Height Bool) Interpret) 'VecNil
+instance Show (SingField d)
+
+singHeight :: SingNat Height
+unindex :: Finger Height v -> SingField (Unindex v)
+index :: SingField d -> Finger Height (Index d)
+interpret :: SingField d -> SingUniverse (Interpret d)
+showsPrecUniverse :: SingUniverse u -> Int -> Ground u -> ShowS
+
+-- TODO: Move this function into a different module
+vectorizedEquality ::
+     SingUniverse u
+  -> Ground u
+  -> Vectorize u
+  -> MutablePrimArray s Word8
+  -> Int -- offset
+  -> Int -- length
+  -> ST s ()
+
+vectorizedFilter ::
+     SingUniverse u
+  -> Vectorize u
+  -> PrimArray Word8
+  -> Int -- offset
+  -> Int -- length
+  -> Vectorize u
+
+-- TODO: Think about this more. If we change Interpret to
+-- make the Vec go to Universe, then we would not need
+-- this anymore. Does this lead to a worse user experience
+-- in any cases?
+indexRoundTrip :: SingField d -> (Unindex (Index d) :~: d)
 

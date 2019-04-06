@@ -1,3 +1,4 @@
+{-# language BangPatterns #-}
 {-# language DataKinds #-}
 {-# language EmptyCase #-}
 {-# language KindSignatures #-}
@@ -13,6 +14,7 @@
 module Accordion.Types
   ( -- data types
     Nat(..)
+  , SingNat(..)
   , Fin(..)
   , Gte(..)
   , SingGte(..)
@@ -24,27 +26,33 @@ module Accordion.Types
   , Finger(..)
   , SingBool(..)
     -- data types for instances
-  , Shown(..)
     -- type families
   , Empty
   , Union
   , Singleton
     -- functions
+  , map
   , leftUnion
+  , zipM_
   , singleton
   , empty
+  , omnibuild
+  , omnifoldr
   ) where
+
+import Prelude hiding (map)
 
 import Data.Kind (Type)
 import Data.Void (Void,absurd)
 
-newtype Shown (k :: Type) (f :: k -> Type) (a :: k) where
-  Shown :: forall (k :: Type) (f :: k -> Type) (a :: k).
-       (f a -> String)
-    -> Shown k f a
+-- newtype Shown :: Type -> Type where
+--   Shown :: (f (g (h a)) -> String) -> Shown f g h a
 
 -- Natural Numbers
 data Nat = Zero | Succ Nat
+data SingNat :: Nat -> Type where
+  SingZero :: SingNat 'Zero
+  SingSucc :: SingNat n -> SingNat ('Succ n)
 -- An uncommon definition of Finite Numbers. Typically, Fin 0 has
 -- no inhabitants, but for our purposes, we want it to have one
 -- inhabitant.
@@ -124,6 +132,24 @@ data Omnitree (h :: Nat) (n :: Nat) (i :: Vec h Bool -> Type) (v :: Vec n Bool) 
     -> Omnitree h ('Succ n) i ('VecCons 'True v)
     -> Omnitree h n i v
 
+-- The implementation is efficient. This function typically gets
+-- used to build CAFs that last for a program's lifetime, so the
+-- efficiency doesn't really matter.
+omnibuild :: forall h i.
+     SingNat h
+  -> (forall v. Finger h v -> i v)
+  -> Omnitree h 'Zero i 'VecNil
+omnibuild h0 f = go (gteZero h0) FingerNil where
+  go :: forall m w. Gte h m -> Finger m w -> Omnitree h m i w
+  go GteEq v = OmnitreeLeaf (f v)
+  go (GteGt gt) v = OmnitreeBranch (go gt (FingerCons SingFalse v)) (go gt (FingerCons SingTrue v))
+
+gteZero :: forall n. SingNat n -> Gte n 'Zero
+gteZero = go GteEq where
+  go :: forall m. Gte n m -> SingNat m -> Gte n 'Zero
+  go gt SingZero = gt
+  go gt (SingSucc x) = go (GteGt gt) x
+
 -- singletonBase :: forall (h :: Nat) (v :: Vec h Bool) (s :: SetFin h h) (i :: Vec h Bool -> Type).
 --   Finger h v -> i v -> Tree h 'Zero i (Singleton h h v ('SetFinLeaf 'True)) 'VecNil
 -- singletonBase FingerNil e = TreeLeaf (Present e)
@@ -175,13 +201,60 @@ singleton :: forall (h :: Nat) (n :: Nat) (v :: Vec h Bool) (w :: Vec n Bool) (s
      SingGte h n gt -- TODO: Remove the SingGte argument. Replace with Proxy.
   -> Finger n w -- Finger to node under consideration
   -> Finger h v -- Finger to singleton leaf node, does not change while recursing
-  -> i v -- Value in the only enabled tree leaf node
   -> Tree h n i s w
   -> Tree h 'Zero i (Singleton h n w s gt) 'VecNil
-singleton _ FingerNil _ _ s = s
-singleton sgt (FingerCons b bs) v e s = case b of
-  SingFalse -> singleton (SingGteGt sgt) bs v e (TreeLeft s)
-  SingTrue -> singleton (SingGteGt sgt) bs v e (TreeRight s)
+singleton _ FingerNil _ s = s
+singleton sgt (FingerCons b bs) v s = case b of
+  SingFalse -> singleton (SingGteGt sgt) bs v (TreeLeft s)
+  SingTrue -> singleton (SingGteGt sgt) bs v (TreeRight s)
+
+map ::
+     forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: SetFin h n)
+     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type).
+     (forall (v :: Vec h Bool). Finger h v -> i v -> j v)
+  -> Finger n w -- finger to the current nodes
+  -> Tree h n i s w -- left tree
+  -> Tree h n j s w
+map f !v (TreeLeaf x) = TreeLeaf (f v x)
+map _ !_ TreeEmpty = TreeEmpty
+map f !v (TreeLeft a) = TreeLeft (map f (FingerCons SingFalse v) a)
+map f !v (TreeRight b) = TreeRight (map f (FingerCons SingTrue v) b)
+map f !v (TreeBranch a b) = TreeBranch (map f (FingerCons SingFalse v) a) (map f (FingerCons SingTrue v) b)
+
+-- Zip the trees together. Only apply the function where
+-- leaves are present in both trees.
+-- TODO: Figure out a better naming scheme. The functions leftUnion
+-- and rightZip do not use the words left and right consistently.
+zipM_ ::
+     forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: SetFin h n) (s :: SetFin h n)
+     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
+     Monad m
+  => (forall (v :: Vec h Bool). Finger h v -> i v -> j v -> m ())
+  -> Finger n w -- finger to the current nodes
+  -> Tree h n i r w -- left tree
+  -> Tree h n j s w -- right tree
+  -> m ()
+zipM_ _ !_ TreeEmpty _ = pure ()
+zipM_ f !v (TreeLeaf x) (TreeLeaf y) = f v x y
+zipM_ _ !_ (TreeLeaf _) (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
+zipM_ _ !_ (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
+zipM_ _ !_ (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
+zipM_ _ !_ (TreeLeaf _) TreeEmpty = pure ()
+zipM_ _ !_ (TreeLeft _) (TreeRight _) = pure ()
+zipM_ f !v (TreeLeft a) (TreeLeft b) = zipM_ f (FingerCons SingFalse v) a b
+zipM_ f !v (TreeLeft a) (TreeBranch b _) = zipM_ f (FingerCons SingFalse v) a b
+zipM_ _ !_ (TreeLeft t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+zipM_ _ !_ (TreeLeft _) TreeEmpty = pure ()
+zipM_ _ !_ (TreeRight _) (TreeLeft _) = pure ()
+zipM_ f !v (TreeRight a) (TreeRight b) = zipM_ f (FingerCons SingTrue v) a b
+zipM_ f !v (TreeRight a) (TreeBranch _ b) = zipM_ f (FingerCons SingTrue v) a b
+zipM_ _ !_ (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+zipM_ _ !_ (TreeRight _) TreeEmpty = pure ()
+zipM_ f !v (TreeBranch a _) (TreeLeft b) = zipM_ f (FingerCons SingFalse v) a b
+zipM_ f !v (TreeBranch _ a) (TreeRight b) = zipM_ f (FingerCons SingTrue v) a b
+zipM_ f !v (TreeBranch a1 a2) (TreeBranch b1 b2) = zipM_ f (FingerCons SingFalse v) a1 b1 *> zipM_ f (FingerCons SingTrue v) a2 b2
+zipM_ _ !_ (TreeBranch t _) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+zipM_ _ !_ (TreeBranch _ _) TreeEmpty = pure ()
 
 -- Left-biased union.
 leftUnion :: forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: SetFin h n) (s :: SetFin h n) (i :: Vec h Bool -> Type).
@@ -210,6 +283,25 @@ leftUnion (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 
+-- Right fold over the values in a tree using an omnitree for
+-- per-slot behavior.
+omnifoldr ::
+     Omnitree h n i v
+  -> (forall (w :: Vec h Bool). i w -> j w -> b -> b)
+  -> b
+  -> Tree h n j s v
+  -> b
+omnifoldr (OmnitreeLeaf i) g b (TreeLeaf j) = g i j b
+omnifoldr (OmnitreeLeaf _) _ _ (TreeLeft t) = absurd (impossibleGte (treeToGte t))
+omnifoldr (OmnitreeLeaf _) _ _ (TreeRight t) = absurd (impossibleGte (treeToGte t))
+omnifoldr (OmnitreeLeaf _) _ _ (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
+omnifoldr (OmnitreeLeaf _) _ b TreeEmpty = b
+omnifoldr (OmnitreeBranch x y) g b (TreeBranch p q) = omnifoldr x g (omnifoldr y g b q) p
+omnifoldr (OmnitreeBranch x _) g b (TreeLeft p) = omnifoldr x g b p
+omnifoldr (OmnitreeBranch _ y) g b (TreeRight q) = omnifoldr y g b q
+omnifoldr (OmnitreeBranch x _) _ _ (TreeLeaf _) = absurd (impossibleGte (omnitreeToGte x))
+omnifoldr (OmnitreeBranch _ _) _ b TreeEmpty = b
+
 impossibleGte :: forall (m :: Nat). Gte m ('Succ m) -> Void
 impossibleGte (GteGt g) = impossibleGte (predGte g)
 
@@ -223,32 +315,13 @@ treeToGte (TreeBranch t _) = GteGt (treeToGte t)
 treeToGte (TreeLeft t) = GteGt (treeToGte t)
 treeToGte (TreeRight t) = GteGt (treeToGte t)
 
--- This uses a non-linear pattern match. Might be bad. Not sure.
--- I think the appropriate evidence will be brought into scope
--- when this is being used, but we'll see.
--- type family Duplicate (h :: Nat) (n :: Nat) (s :: SetFin h n) :: SetFin ('Succ h) n where
---   Duplicate h h (SetFinLeaf b) = SetFinBranch (SetFinLeaf b) (SetFinLeaf b)
---   Duplicate h n (SetFinBranch x y) = SetFinBranch (Duplicate h ('Succ n) x) (Duplicate h ('Succ n) y)
-
--- Construct an empty set of a given height. The third argument is only used
--- as evidence that n <= h.
--- type family Empty (h :: Nat) (n :: Nat) (s :: SetFin h n) :: SetFin h n where
---   Empty h h ('SetFinLeaf _) = 'SetFinLeaf 'False
---   Empty h n ('SetFinBranch bl br) = 'SetFinBranch (Empty h ('Succ n) bl) (Empty h ('Succ n) br)
+omnitreeToGte :: Omnitree h n i v -> Gte h n
+omnitreeToGte (OmnitreeBranch t _) = GteGt (omnitreeToGte t)
+omnitreeToGte (OmnitreeLeaf _) = GteEq
 
 type family Empty (h :: Nat) (n :: Nat) (gt :: Gte h n) (v :: Vec n Bool) :: SetFin h n where
   Empty h h 'GteEq bs = 'SetFinLeaf
   
--- type family Empty (h :: Nat) (n :: Nat) (x :: SetFin h n) :: SetFin h n where
---   Empty h h ('SetFinLeaf _) = SetFinLeaf 'False
---   Empty ('Succ h) n ('SetFinBranch s _) = Duplicate ('Succ h) ('Succ n) (Empty h n s) -- SetFinBranch (Empty h ('Succ n)) (Empty h ('Succ n))
-
--- Construct an empty set of a given height. The third argument is only used
--- as evidence that n <= h.
--- type family Empty (h :: Nat) (n :: Nat) (x :: SetFin h n) :: SetFin h n where
---   Empty h h ('SetFinLeaf _) = SetFinLeaf 'False
---   Empty ('Succ h) n ('SetFinBranch s _) = Duplicate ('Succ h) ('Succ n) (Empty ('Succ h) ('Succ n) s) -- SetFinBranch (Empty h ('Succ n)) (Empty h ('Succ n))
-
 -- Construct a singleton set. One leaf is true and all others
 -- are false.
 type family Singleton (h :: Nat) (n :: Nat) (v :: Vec n Bool) (x :: SetFin h n) (gt :: Gte h n) :: SetFin h 'Zero where
@@ -274,19 +347,3 @@ type family Union (h :: Nat) (n :: Nat) (x :: SetFin h n) (y :: SetFin h n) :: S
   Union h 'Zero ('SetFinRight x) 'SetFinEmpty = 'SetFinRight x
   Union h 'Zero ('SetFinBranch xl xr) 'SetFinEmpty = 'SetFinBranch xl xr
   Union h n ('SetFinBranch xl xr) ('SetFinBranch yl yr) = 'SetFinBranch (Union h ('Succ n) xl yl) (Union h ('Succ n) xr yr)
-
-type family Or (x :: Bool) (y :: Bool) :: Bool where
-  Or 'True _ = 'True
-  Or 'False x = x
-
--- Construct a singleton set. One leaf is true and all others
--- are false. Unfortunately, we cannot write this since
--- the constructive approach to addition makes things awful.
--- type family Singleton (h :: Nat) (p :: Nat) (v :: Vec h Bool) (x :: Set p) :: Set (Plus h p) where
---   Singleton 'Zero p 'VecNil s = s
---   Singleton ('Succ h) p ('VecCons 'False v) s =
---     Singleton h ('Succ p) v (SetBranch s (Empty p))
--- type family Empty (h :: Nat) :: Set h where
---   Empty 'Zero = SetLeaf 'False
---   Empty ('Succ h) = SetBranch (Empty h) (Empty h)
-

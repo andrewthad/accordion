@@ -7,6 +7,7 @@ library
   build-depends:
     , base >= 4.11.1 && < 5
     , accordion-types
+    , primitive >= 0.6.4
   exposed-modules: Accordion.Record
   signatures: Accordion.Universe
   default-language: Haskell2010
