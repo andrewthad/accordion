@@ -44,6 +44,10 @@ import GHC.Show (showList__)
 import qualified Accordion.Types as A
 import qualified Data.Primitive as PM
 
+-- TODO: Make the user define Record in the argument module. This
+-- will make it possible to have other indefinite module that supply
+-- additional functions if the user is willing to implement whatever
+-- extra things that are required.
 newtype Record :: (Type -> Type) -> SetFin Height 'Zero -> Type where
   Record :: Tree Height 'Zero (Interpreted f) s 'VecNil -> Record f s
 

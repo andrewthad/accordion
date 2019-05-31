@@ -33,6 +33,7 @@ module Accordion.Types
     -- functions
   , map
   , leftUnion
+  , split
   , zipM_
   , singleton
   , empty
@@ -40,10 +41,22 @@ module Accordion.Types
   , omnifoldr
   ) where
 
-import Prelude hiding (map)
+import Prelude hiding (map,traverse)
 
+import Control.Applicative (liftA2)
 import Data.Kind (Type)
 import Data.Void (Void,absurd)
+import Data.Proxy (Proxy)
+import Data.Functor.Const (Const(..))
+import Control.Monad.Trans.State.Strict (State)
+import Data.Map (Map)
+import Data.Set.NonEmpty (NESet)
+
+import qualified Control.Monad.Trans.State.Strict as State
+import qualified Data.List as L
+import qualified Data.Map.Strict as M
+import qualified Data.Set.NonEmpty as NES
+import qualified Data.Set as S
 
 -- newtype Shown :: Type -> Type where
 --   Shown :: (f (g (h a)) -> String) -> Shown f g h a
@@ -81,7 +94,7 @@ data SetFin (h :: Nat) (n :: Nat) where
 
 -- Consider inlining SingBool into the FingerCons data constructor.
 -- This could improve performance but needs to be benchmarked.
-data Finger (n :: Nat) (v :: Vec n Bool) where
+data Finger :: forall (n :: Nat) -> Vec n Bool -> Type where
   FingerNil :: Finger 'Zero 'VecNil
   FingerCons :: SingBool b -> Finger n v -> Finger ('Succ n) ('VecCons b v)
 data SingBool :: Bool -> Type where
@@ -100,6 +113,189 @@ data Gte :: Nat -> Nat -> Type where
 data SingGte (m :: Nat) (n :: Nat) (gt :: Gte m n) where
   SingGteEq :: SingGte m m 'GteEq
   SingGteGt :: forall (m :: Nat) (n :: Nat) (gt :: Gte m ('Succ n)). SingGte m ('Succ n) gt -> SingGte m n ('GteGt gt)
+
+-- ununion :: UnionWitness h n rs ss
+--         -> Tree h n i (Union h n rs ss)
+--         -> (Tree h n i rs,Tree h n i ss)
+-- ununion 
+-- 
+-- data UnionWitness :: forall (h :: Nat) -> forall (n :: Nat) -> SetFin h n -> SetFin h n -> Type where
+--   UnionWitness 
+
+split ::
+     Tree h n p1 rs v
+  -> Tree h n p2 ss v
+  -> Tree h n i (Union h n rs ss) v
+  -> (Tree h n i rs v, Tree h n i ss v)
+split TreeEmpty TreeEmpty TreeEmpty = (TreeEmpty,TreeEmpty)
+split (TreeLeft _) TreeEmpty y = case y of
+  TreeLeft z -> (TreeLeft z, TreeEmpty)
+split (TreeLeft a) (TreeLeft b) y = case y of
+  TreeLeft z -> let (r1,r2) = split a b z in (TreeLeft r1, TreeLeft r2)
+split (TreeLeft _) (TreeRight _) y = case y of
+  TreeBranch z1 z2 -> (TreeLeft z1,TreeRight z2)
+
+data Query :: forall (h :: Nat)
+           -> (SetFin h 'Zero -> Type) -> (Vec h Bool -> Type) -> (Vec h Bool -> Type)
+           -> SetFin h 'Zero -> SetFin h 'Zero -> Type where
+  QueryJoin ::
+       Query h t c r rs as
+    -> Query h t c r ss bs
+    -> Query h t c r (Union h 'Zero rs ss) (Union h 'Zero as bs)
+  QueryIntersection ::
+       Query h t c r rs as
+    -> Query h t c r ss bs
+    -> Query h t c r (Intersection h 'Zero rs ss) (Union h 'Zero as bs)
+  QueryVariables :: Tree h 'Zero v rs 'VecNil -> Query h t c v rs rs
+  QueryTable ::
+       t rs
+    -> Tree h 'Zero c rs 'VecNil
+    -> Query h t c v rs 'SetFinEmpty
+  QueryEmpty :: Query h t c r rs 'SetFinEmpty
+  QueryIdentity ::
+       Finger h v
+    -> Finger h w
+    -> Query h t c r (Union h 'Zero (Singleton h h v 'SetFinLeaf 'GteEq) (Singleton h h w 'SetFinLeaf 'GteEq)) 'SetFinEmpty
+
+queryColumns :: Query h t c r cs rs -> Tree h 'Zero c cs 'VecNil
+queryColumns (QueryTable _ cols) = cols
+queryColumns (QueryJoin a b) = leftUnion (queryColumns a) (queryColumns b)
+
+queryVariables :: Query h t c v cs vs -> Tree h 'Zero v vs 'VecNil
+queryVariables (QueryTable _ cols) = TreeEmpty
+queryVariables (QueryVariables vars) = vars
+queryVariables (QueryJoin a b) = leftUnion (queryVariables a) (queryVariables b)
+
+assignColumns :: Query h t c r cs vs -> Query h t (Const Column) r cs vs
+assignColumns x = State.evalState (go x) 0 where
+  go :: Query h t c v cs vs -> State Int (Query h t (Const Column) v cs vs)
+  go (QueryTable tbl cols) = QueryTable tbl
+    <$> traverse
+        (\_ _ -> do
+          State.modify (+1)
+          n <- State.get
+          pure (Const (Column ("n" ++ show n)))
+        ) FingerNil cols
+
+assignVariables :: Tree h 'Zero v vs 'VecNil -> Query h t c w cs vs -> Query h t c v cs vs
+assignVariables t (QueryTable tbl cols) = QueryTable tbl cols
+assignVariables t (QueryJoin a b) = case split (queryVariables a) (queryVariables b) t of
+  (left,right) -> QueryJoin (assignVariables left a) (assignVariables right b)
+assignVariables _ QueryEmpty = QueryEmpty
+assignVariables t (QueryVariables _) = QueryVariables t
+
+nameQuery :: Query h t c v cs vs -> Query h t (Const Column) (Const Variable) cs vs
+nameQuery q = assignVariables (varIdentifiers (queryVariables q)) (assignColumns q)
+
+varIdentifiers :: Tree h 'Zero v vs 'VecNil -> Tree h 'Zero (Const Variable) vs 'VecNil
+varIdentifiers = flip State.evalState 0 . traverse
+  (\_ _ -> do
+    State.modify (+1)
+    n <- State.get
+    pure (Const (Variable n))
+  ) FingerNil
+
+data Infinite = Infinite
+  Fragment -- query with a finite number of results
+  [(Column,Variable)] -- variables not yet matched with columns
+
+-- Names of variables in prepared statements
+data Variable = Variable Int
+  deriving (Eq,Ord)
+
+-- Used when natural join decides whether or not it should
+-- declare two columns equivalent. We do not actually rely
+-- on postgres's natural join. We manually specify the join
+-- columns in the query.
+data Column = Column String
+  deriving (Eq,Ord)
+
+-- Labels used in the actual postgres query. All labels are
+-- distinct so that we do not have to worry about scope.
+data Label = Label String
+  deriving (Eq,Ord)
+
+data Fragment
+  = FragmentJoin Fragment Fragment [(Label,Label)]
+  | FragmentProject Fragment (S.Set Label)
+  | FragmentUnion Fragment Fragment [(Label,Label)]
+    -- must have identical columns, labels may differ
+  | FragmentPredicate Fragment Label Variable -- must match an existing column
+  | FragmentEmpty (S.Set Column)
+  | FragmentTable String (Map Column Label)
+
+data Block
+  = BlockUnion Block Block [(Label,Label)]
+  | BlockCpjr
+      (S.Set Label)
+      Fragment
+      [(Fragment,[(Label,Label)])]
+      [(Label,Variable)]
+  | BlockTable String (S.Set Label)
+
+
+-- Does not include the select clause or parens around the query,
+-- returns an SQL fragment and the columns to add to the select
+-- clause.
+toSqlGo :: Block -> State Int String
+toSqlGo (BlockUnion a b pairs) =
+  -- We must rename the columns in b to match a.
+  let bsql = "(SELECT " ++ "" ++ " FROM " ++ toSqlGo b ++ ")"
+   in "(" ++ toSql a ++ " UNION " ++ bsql ++ ")"
+toSqlGo (BlockCpjr sels tbl0 tbls preds) = do
+  aliasTbl0 <- State.modify *> State.get
+  pure $
+       "(SELECT "
+    ++ drop 1
+       (S.foldr
+         (\(Label lbl) s -> "," ++ lbl ++ s) "" sels
+       )
+    ++ " FROM "
+    ++ toSqlGo tbl0
+    ++ " t" ++ show aliasTbl0
+    ++ _
+    ++ " WHERE "
+    ++ 
+    ++ ")"
+toSqlGo (BlockTable tbl cols) = pure
+   $ "(SELECT "
+  ++ drop 1
+     (M.foldrWithKey
+       (\(Column col) (Label lbl) s -> "," ++ col ++ " AS " ++ lbl ++ s) "" cols
+     )
+  ++ " FROM "
+  ++ tbl
+  ++ ")"
+
+prepareQuery ::
+     Query h t (Const Column) (Const Variable) cs vs
+  -> Infinite
+prepareQuery (QueryJoin x y) =
+  let Infinite fragA predsA = prepareQuery x
+      Infinite fragB predsB = prepareQuery y
+      interMap = M.intersectionWith (,) (columnsOf fragA) (columnsOf fragB)
+      interList = M.foldr (\(c1,c2) xs -> (NES.findMax c1,NES.findMax c2) : xs) [] interMap
+      (fragA',predsB') = applyPredicates fragA predsB
+      (fragB',predsA') = applyPredicates fragB predsA
+   in Infinite (FragmentJoin fragA' fragB' interList) (predsA' ++ predsB')
+
+columnsOf :: Fragment -> Map Column (NESet Label)
+columnsOf (FragmentJoin xs ys _) = M.unionWith (<>) (columnsOf xs) (columnsOf ys)
+columnsOf (FragmentPredicate xs _ _) = columnsOf xs
+columnsOf (FragmentTable _ xs) = fmap NES.singleton xs
+
+applyPredicates :: Fragment -> [(Column,Variable)] -> (Fragment,[(Column,Variable)])
+applyPredicates table@(FragmentTable _ xs) ys = L.foldl'
+  ( \(frag,zs) (a,b) -> case M.lookup a xs of
+    Nothing -> (frag,(a,b):zs)
+    Just label -> (FragmentPredicate frag label b,zs)
+  ) (table,[]) ys
+
+-- These are valid queries:
+--   select * from (select x,y from foo) j join (select z from bar) k on j.x = k.z;
+--   select * from (select x,y from foo) j cross join (select z from bar) k;
+--   (select z from bar) UNION (select distinct unnest(array[1,2,3]));
+-- tableColumns :: Table rs -> 
 
 -- A balanced tree that always has a base-two number of leaves. The
 -- type of the element at each position is determined by the interpretation
@@ -213,13 +409,27 @@ map ::
      (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type).
      (forall (v :: Vec h Bool). Finger h v -> i v -> j v)
   -> Finger n w -- finger to the current nodes
-  -> Tree h n i s w -- left tree
+  -> Tree h n i s w -- tree
   -> Tree h n j s w
 map f !v (TreeLeaf x) = TreeLeaf (f v x)
 map _ !_ TreeEmpty = TreeEmpty
 map f !v (TreeLeft a) = TreeLeft (map f (FingerCons SingFalse v) a)
 map f !v (TreeRight b) = TreeRight (map f (FingerCons SingTrue v) b)
 map f !v (TreeBranch a b) = TreeBranch (map f (FingerCons SingFalse v) a) (map f (FingerCons SingTrue v) b)
+
+traverse ::
+     forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: SetFin h n)
+     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
+     Applicative m
+  => (forall (v :: Vec h Bool). Finger h v -> i v -> m (j v))
+  -> Finger n w -- finger to the current nodes
+  -> Tree h n i s w -- tree
+  -> m (Tree h n j s w)
+traverse f !v (TreeLeaf x) = TreeLeaf <$> f v x
+traverse _ !_ TreeEmpty = pure TreeEmpty
+traverse f !v (TreeLeft a) = TreeLeft <$> traverse f (FingerCons SingFalse v) a
+traverse f !v (TreeRight b) = TreeRight <$> traverse f (FingerCons SingTrue v) b
+traverse f !v (TreeBranch a b) = liftA2 TreeBranch (traverse f (FingerCons SingFalse v) a) (traverse f (FingerCons SingTrue v) b)
 
 -- Zip the trees together. Only apply the function where
 -- leaves are present in both trees.
@@ -228,7 +438,7 @@ map f !v (TreeBranch a b) = TreeBranch (map f (FingerCons SingFalse v) a) (map f
 zipM_ ::
      forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: SetFin h n) (s :: SetFin h n)
      (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
-     Monad m
+     Applicative m
   => (forall (v :: Vec h Bool). Finger h v -> i v -> j v -> m ())
   -> Finger n w -- finger to the current nodes
   -> Tree h n i r w -- left tree
@@ -262,26 +472,26 @@ leftUnion :: forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: SetFin h n) (s
   -> Tree h n i s w
   -> Tree h n i (Union h n r s) w
 leftUnion TreeEmpty t = t
-leftUnion (TreeLeaf x) TreeEmpty = TreeLeaf x
-leftUnion (TreeLeaf x) (TreeLeaf _) = TreeLeaf x
-leftUnion (TreeLeft x) (TreeLeft y) = TreeLeft (leftUnion x y)
-leftUnion (TreeBranch xl xr) (TreeRight yr) = TreeBranch xl (leftUnion xr yr)
-leftUnion (TreeBranch xl xr) (TreeLeft yl) = TreeBranch (leftUnion xl yl) xr
-leftUnion (TreeBranch xl xr) (TreeBranch yl yr) = TreeBranch (leftUnion xl yl) (leftUnion xr yr)
-leftUnion (TreeLeft xl) (TreeBranch yl yr) = TreeBranch (leftUnion xl yl) yr
-leftUnion (TreeRight xr) (TreeBranch yl yr) = TreeBranch yl (leftUnion xr yr)
-leftUnion (TreeRight x) (TreeRight y) = TreeRight (leftUnion x y)
-leftUnion (TreeLeaf _) (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeBranch t _) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeBranch xl xr) (TreeBranch yl yr) = TreeBranch (leftUnion xl yl) (leftUnion xr yr)
+leftUnion (TreeBranch xl xr) (TreeLeft yl) = TreeBranch (leftUnion xl yl) xr
+leftUnion (TreeBranch xl xr) (TreeRight yr) = TreeBranch xl (leftUnion xr yr)
 leftUnion (TreeBranch xl xr) TreeEmpty = TreeBranch xl xr
-leftUnion (TreeLeft x) TreeEmpty = TreeLeft x
-leftUnion (TreeRight x) TreeEmpty = TreeRight x
-leftUnion (TreeLeft x) (TreeRight y) = TreeBranch x y
-leftUnion (TreeRight x) (TreeLeft y) = TreeBranch y x
-leftUnion (TreeLeft t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
-leftUnion (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeLeaf _) (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeLeaf x) (TreeLeaf _) = TreeLeaf x
+leftUnion (TreeLeaf x) TreeEmpty = TreeLeaf x
+leftUnion (TreeLeft t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeLeft x) (TreeLeft y) = TreeLeft (leftUnion x y)
+leftUnion (TreeLeft x) (TreeRight y) = TreeBranch x y
+leftUnion (TreeLeft x) TreeEmpty = TreeLeft x
+leftUnion (TreeLeft xl) (TreeBranch yl yr) = TreeBranch (leftUnion xl yl) yr
+leftUnion (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+leftUnion (TreeRight x) (TreeLeft y) = TreeBranch y x
+leftUnion (TreeRight x) (TreeRight y) = TreeRight (leftUnion x y)
+leftUnion (TreeRight x) TreeEmpty = TreeRight x
+leftUnion (TreeRight xr) (TreeBranch yl yr) = TreeBranch yl (leftUnion xr yr)
 
 -- Right fold over the values in a tree using an omnitree for
 -- per-slot behavior.
@@ -331,19 +541,21 @@ type family Singleton (h :: Nat) (n :: Nat) (v :: Vec n Bool) (x :: SetFin h n) 
   Singleton h ('Succ n) ('VecCons 'True v) s gt =
     Singleton h n v ('SetFinRight s) ('GteGt gt)
 
+type family Intersection (h :: Nat) (n :: Nat) (x :: SetFin h n) (y :: SetFin h n) :: SetFin h n where
+  Intersection h h 'SetFinLeaf 'SetFinLeaf = 'SetFinLeaf
 type family Union (h :: Nat) (n :: Nat) (x :: SetFin h n) (y :: SetFin h n) :: SetFin h n where
   Union h h 'SetFinLeaf 'SetFinLeaf = 'SetFinLeaf
   Union 'Zero 'Zero 'SetFinLeaf 'SetFinEmpty = 'SetFinLeaf
   Union h 'Zero 'SetFinEmpty s = s
   Union h 'Zero ('SetFinLeft x) 'SetFinEmpty = 'SetFinLeft x
-  Union h n ('SetFinBranch xl xr) ('SetFinLeft yl) = 'SetFinBranch (Union h ('Succ n) xl yl) xr
-  Union h n ('SetFinBranch xl xr) ('SetFinRight yr) = 'SetFinBranch xl (Union h ('Succ n) xr yr)
-  Union h n ('SetFinLeft xl) ('SetFinBranch yl yr) = 'SetFinBranch (Union h ('Succ n) xl yl) yr
-  Union h n ('SetFinRight xr) ('SetFinBranch yl yr) = 'SetFinBranch yl (Union h ('Succ n) xr yr)
   Union h n ('SetFinLeft x) ('SetFinLeft y) = 'SetFinLeft (Union h ('Succ n) x y)
   Union h n ('SetFinLeft x) ('SetFinRight y) = 'SetFinBranch x y
-  Union h n ('SetFinRight x) ('SetFinRight y) = 'SetFinRight (Union h ('Succ n) x y)
+  Union h n ('SetFinLeft xl) ('SetFinBranch yl yr) = 'SetFinBranch (Union h ('Succ n) xl yl) yr
   Union h n ('SetFinRight x) ('SetFinLeft y) = 'SetFinBranch y x
+  Union h n ('SetFinRight x) ('SetFinRight y) = 'SetFinRight (Union h ('Succ n) x y)
+  Union h n ('SetFinRight xr) ('SetFinBranch yl yr) = 'SetFinBranch yl (Union h ('Succ n) xr yr)
+  Union h n ('SetFinBranch xl xr) ('SetFinLeft yl) = 'SetFinBranch (Union h ('Succ n) xl yl) xr
+  Union h n ('SetFinBranch xl xr) ('SetFinRight yr) = 'SetFinBranch xl (Union h ('Succ n) xr yr)
   Union h 'Zero ('SetFinRight x) 'SetFinEmpty = 'SetFinRight x
   Union h 'Zero ('SetFinBranch xl xr) 'SetFinEmpty = 'SetFinBranch xl xr
   Union h n ('SetFinBranch xl xr) ('SetFinBranch yl yr) = 'SetFinBranch (Union h ('Succ n) xl yl) (Union h ('Succ n) xr yr)
