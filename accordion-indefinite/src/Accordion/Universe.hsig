@@ -6,6 +6,7 @@
 signature Accordion.Universe where
 
 import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger)
+import Accordion.World (World(..),Primitive,SingWorld,GroundPrimitive)
 import Control.Monad.ST (ST)
 import Data.Kind (Type)
 import Data.Type.Equality ((:~:))
@@ -17,41 +18,67 @@ data Field :: Type
 data SingField :: Field -> Type
 data Universe :: Type
 data SingUniverse :: Universe -> Type
-type family Unindex (v :: Vec Height Bool) :: Field where ..
 type family Index (d :: Field) :: Vec Height Bool where ..
-type family Interpret (v :: Field) :: Universe where ..
-type family Ground (u :: Universe) :: Type where ..
-type family Vectorize (u :: Universe) :: Type where ..
+type family Interpret (v :: Vec Height Bool) :: Universe where ..
 
-instance Show (SingField d)
+data Extra :: Type
+data SingExtra :: Extra -> Type
+type family InterpretExtra (e :: Extra) :: Type where ..
+
+-- Convert a universe to the user-facing type
+type family Ground (u :: Universe) :: Type where ..
+
+-- Convert a universe to a type that is used as an internal
+-- representation of the user-facing type.
+type family Represent (u :: Universe) :: World Extra where ..
+
+represent :: SingUniverse u -> SingWorld SingExtra (Represent u)
+
+-- This function is weird. There must be a better way.
+-- No, there is not.
+showIndexField :: Finger Height v -> String
 
 singHeight :: SingNat Height
-unindex :: Finger Height v -> SingField (Unindex v)
 index :: SingField d -> Finger Height (Index d)
-interpret :: SingField d -> SingUniverse (Interpret d)
+interpret :: Finger Height v -> SingUniverse (Interpret v)
 showsPrecUniverse :: SingUniverse u -> Int -> Ground u -> ShowS
 
--- TODO: Move this function into a different module
-vectorizedEquality ::
+eqExtra :: SingExtra e -> InterpretExtra e -> InterpretExtra e -> Bool
+
+-- I really do not like having this type family in the signature.
+-- If GHC supported partially applied type families, I could avoid this.
+-- We actually have to duplicate this type family in the implementation
+-- of the signature. Not good at all.
+type family GroundWorld (w :: World Extra) :: Type where
+  GroundWorld ('Primitive p) = GroundPrimitive p
+  GroundWorld ('Other e) = InterpretExtra e
+
+toInternal ::
      SingUniverse u
   -> Ground u
-  -> Vectorize u
-  -> MutablePrimArray s Word8
-  -> Int -- offset
-  -> Int -- length
-  -> ST s ()
+  -> GroundWorld (Represent u)
 
-vectorizedFilter ::
+fromInternal ::
      SingUniverse u
-  -> Vectorize u
-  -> PrimArray Word8
-  -> Int -- offset
-  -> Int -- length
-  -> Vectorize u
+  -> GroundWorld (Represent u)
+  -> Ground u
 
--- TODO: Think about this more. If we change Interpret to
--- make the Vec go to Universe, then we would not need
--- this anymore. Does this lead to a worse user experience
--- in any cases?
-indexRoundTrip :: SingField d -> (Unindex (Index d) :~: d)
+-- data RingExplicit :: Universe -> Type
 
+-- TODO: Move this function into a different module
+-- vectorizedEquality ::
+--      SingUniverse u
+--   -> Ground u
+--   -> Vectorize u
+--   -> MutablePrimArray s Word8
+--   -> Int -- offset
+--   -> Int -- length
+--   -> ST s ()
+
+-- vectorizedFilter ::
+--      SingUniverse u
+--   -> Vectorize u
+--   -> PrimArray Word8
+--   -> Int -- offset
+--   -> Int -- length
+--   -> Vectorize u

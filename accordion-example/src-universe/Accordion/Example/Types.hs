@@ -1,9 +1,11 @@
 {-# language DataKinds #-}
+{-# language EmptyCase #-}
 {-# language GADTs #-}
 {-# language KindSignatures #-}
 {-# language StandaloneDeriving #-}
 {-# language TypeFamilies #-}
 {-# language TypeOperators #-}
+{-# language UndecidableInstances #-}
 module Accordion.Example.Types
   ( Ground
   , Unindex
@@ -11,6 +13,10 @@ module Accordion.Example.Types
   , Index
   , Field(..)
   , SingField(..)
+  , Extra
+  , SingExtra
+  , Represent
+  , InterpretExtra
   , Universe(..)
   , SingUniverse(..)
     -- values
@@ -19,6 +25,9 @@ module Accordion.Example.Types
   , index
   , interpret
   , indexRoundTrip
+  , represent
+  , showIndexField
+  , eqExtra
   ) where
 
 import Accordion.Types (Nat(..),Vec(..),Omnitree(..),SingNat,SingBool(..))
@@ -26,6 +35,9 @@ import Accordion.Types (Finger(..))
 import Accordion.Nat (N2,n2)
 import Data.Kind (Type)
 import Data.Type.Equality ((:~:)(Refl))
+import Accordion.World (World,SingWorld)
+
+import qualified Accordion.World as W
 
 data Field
   = Age
@@ -63,11 +75,19 @@ type family Index (d :: Field) :: Vec N2 Bool where
   Index 'Letter = 'VecCons 'True ('VecCons 'False 'VecNil)
   Index 'Alive = 'VecCons 'False ('VecCons 'False 'VecNil)
 
-type family Interpret (d :: Field) :: Universe where
+type family Interpret (v :: Vec N2 Bool) :: Universe where
+  Interpret x = InterpretField (Unindex x)
+
+type family InterpretField (d :: Field) :: Universe where
   Interpret 'Age = 'Number
   Interpret 'Health = 'Number
   Interpret 'Alive = 'Boolean
   Interpret 'Letter = 'Character
+
+type family Represent (u :: Universe) :: World Extra where
+  Represent 'Number = ('W.Primitive 'W.Int)
+  Represent 'Boolean = ('W.Primitive 'W.Bool)
+  Represent 'Character = ('W.Primitive 'W.Char)
 
 type family Ground (u :: Universe) :: Type where
   Ground 'Number = Int
@@ -76,6 +96,9 @@ type family Ground (u :: Universe) :: Type where
 
 singHeight :: SingNat N2
 singHeight = n2
+
+showIndexField :: Finger N2 v -> String
+showIndexField = show . unindex
 
 unindex :: Finger N2 v -> SingField (Unindex v)
 unindex (FingerCons SingTrue (FingerCons SingTrue FingerNil)) = SingAge
@@ -89,14 +112,30 @@ index SingHealth = (FingerCons SingFalse (FingerCons SingTrue FingerNil))
 index SingLetter = (FingerCons SingTrue (FingerCons SingFalse FingerNil))
 index SingAlive = (FingerCons SingFalse (FingerCons SingFalse FingerNil))
 
-interpret :: SingField d -> SingUniverse (Interpret d)
-interpret SingAge = SingNumber
-interpret SingHealth = SingNumber
-interpret SingAlive = SingBoolean
-interpret SingLetter = SingCharacter
+interpret :: Finger N2 v -> SingUniverse (Interpret v)
+interpret f = case unindex f of
+  SingAge -> SingNumber
+  SingHealth -> SingNumber
+  SingAlive -> SingBoolean
+  SingLetter -> SingCharacter
+
+represent :: SingUniverse u -> SingWorld SingExtra (Represent u)
+represent SingNumber = W.SingPrimitive W.SingInt
+represent SingCharacter = W.SingPrimitive W.SingChar
+represent SingBoolean = W.SingPrimitive W.SingBool
 
 indexRoundTrip :: SingField d -> (Unindex (Index d) :~: d)
 indexRoundTrip SingAge = Refl
 indexRoundTrip SingHealth = Refl
 indexRoundTrip SingAlive = Refl
 indexRoundTrip SingLetter = Refl
+
+data Extra
+
+data SingExtra :: Extra -> Type where
+
+type family InterpretExtra (e :: Extra) :: Type where
+
+eqExtra :: SingExtra e -> InterpretExtra e -> InterpretExtra e -> Bool
+eqExtra s = case s of {}
+

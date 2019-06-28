@@ -32,7 +32,9 @@ module Accordion.Types
   , Singleton
     -- functions
   , map
+  , traverse
   , leftUnion
+  , zip
   , zipM_
   , singleton
   , empty
@@ -40,8 +42,9 @@ module Accordion.Types
   , omnifoldr
   ) where
 
-import Prelude hiding (map)
+import Prelude hiding (map,zip,traverse)
 
+import Control.Applicative (liftA2)
 import Data.Kind (Type)
 import Data.Void (Void,absurd)
 
@@ -213,7 +216,7 @@ map ::
      (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type).
      (forall (v :: Vec h Bool). Finger h v -> i v -> j v)
   -> Finger n w -- finger to the current nodes
-  -> Tree h n i s w -- left tree
+  -> Tree h n i s w -- argument tree
   -> Tree h n j s w
 map f !v (TreeLeaf x) = TreeLeaf (f v x)
 map _ !_ TreeEmpty = TreeEmpty
@@ -221,10 +224,44 @@ map f !v (TreeLeft a) = TreeLeft (map f (FingerCons SingFalse v) a)
 map f !v (TreeRight b) = TreeRight (map f (FingerCons SingTrue v) b)
 map f !v (TreeBranch a b) = TreeBranch (map f (FingerCons SingFalse v) a) (map f (FingerCons SingTrue v) b)
 
+traverse ::
+     forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: SetFin h n)
+     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
+     Applicative m
+  => (forall (v :: Vec h Bool). Finger h v -> i v -> m (j v))
+  -> Finger n w -- finger to the current nodes
+  -> Tree h n i s w -- argument tree
+  -> m (Tree h n j s w)
+traverse _ !_ TreeEmpty = pure TreeEmpty
+traverse f !v (TreeLeaf x) = fmap TreeLeaf (f v x)
+traverse f !v (TreeLeft a) = fmap TreeLeft (traverse f (FingerCons SingFalse v) a)
+traverse f !v (TreeRight b) = fmap TreeRight (traverse f (FingerCons SingTrue v) b)
+traverse f !v (TreeBranch a b) = liftA2 TreeBranch
+  (traverse f (FingerCons SingFalse v) a)
+  (traverse f (FingerCons SingTrue v) b)
+
+-- Requires the two trees to match exactly. It is possible to provide
+-- a variant that does not require an exact match. Such a function would
+-- use Union in the result type.
+zip :: forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: SetFin h n)
+     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type)
+     (k :: Vec h Bool -> Type).
+     (forall (v :: Vec h Bool). Finger h v -> i v -> j v -> k v)
+  -> Finger n w -- finger to the current nodes
+  -> Tree h n i r w -- left tree
+  -> Tree h n j r w -- right tree
+  -> Tree h n k r w -- result tree
+zip _ !_ TreeEmpty TreeEmpty = TreeEmpty
+zip f !v (TreeLeaf x) (TreeLeaf y) = TreeLeaf (f v x y)
+zip f !v (TreeLeft x) (TreeLeft y) = TreeLeft $! zip f (FingerCons SingFalse v) x y
+zip f !v (TreeRight x) (TreeRight y) = TreeRight $! zip f (FingerCons SingTrue v) x y
+zip f !v (TreeBranch xl xr) (TreeBranch yl yr) =
+  let !l = zip f (FingerCons SingFalse v) xl yl
+      !r = zip f (FingerCons SingTrue v) xr yr
+   in TreeBranch l r
+
 -- Zip the trees together. Only apply the function where
 -- leaves are present in both trees.
--- TODO: Figure out a better naming scheme. The functions leftUnion
--- and rightZip do not use the words left and right consistently.
 zipM_ ::
      forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: SetFin h n) (s :: SetFin h n)
      (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
