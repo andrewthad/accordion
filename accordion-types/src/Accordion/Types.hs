@@ -16,6 +16,8 @@ module Accordion.Types
     Nat(..)
   , SingNat(..)
   , Fin(..)
+  , Cardinality(..)
+  , Blade(..)
   , Gte(..)
   , ApConst1(..)
   , ApConst2(..)
@@ -60,6 +62,11 @@ import Prelude hiding (map,zip,traverse,foldMap)
 import Control.Applicative (liftA2)
 import Data.Kind (Type)
 import Data.Void (Void,absurd)
+import Data.Primitive (PrimArray)
+import Vector.Types (Index)
+
+import Vector.Boxed (BoxedVector)
+import qualified GHC.TypeNats as GHC
 
 -- newtype Shown :: Type -> Type where
 --   Shown :: (f (g (h a)) -> String) -> Shown f g h a
@@ -79,11 +86,12 @@ data Vec :: Nat -> Type -> Type where
   VecNil :: Vec 'Zero a
   VecCons :: a -> Vec n a -> Vec ('Succ n) a
 
-data Meta :: Nat -> Nat -> Type where
+data Meta :: Nat -> Nat -> Nat -> Type where
   Meta ::
        Map () fh 'Zero
-    -> Map (Meta fh ph) ph 'Zero
-    -> Meta fh ph
+    -> Map (Meta fh ph mh) ph 'Zero
+    -> Map (Meta fh ph mh) mh 'Zero
+    -> Meta fh ph mh
 
 -- A finite set. The first number is the total height (total possible
 -- size is 2^h). The second number is how far down from the root
@@ -175,14 +183,58 @@ data Record ::
     forall (fh :: Nat). -- Field height
     forall (ph :: Nat). -- Prefix height
     (Vec fh Bool -> Type) -> -- Interpreter
-    Meta fh ph ->
+    Meta fh ph 'Zero ->
     Type
   where
   Record ::
        Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) i) f 'VecNil
-    -> Tree @ph @'Zero @(Meta fh ph)
-         (ApConst1 @(Meta fh ph) @(Vec ph Bool) (Record @fh @ph i)) p 'VecNil
-    -> Record @fh @ph i ('Meta f p)
+    -> Tree @ph @'Zero @(Meta fh ph 'Zero)
+         (ApConst1 @(Meta fh ph 'Zero) @(Vec ph Bool) (Record @fh @ph i))
+         p 'VecNil
+    -> Record @fh @ph i ('Meta f p 'MapEmpty)
+
+data Cardinality
+  = One
+  | Many
+
+newtype Indexer :: Cardinality -> GHC.Nat -> GHC.Nat -> Type where
+  Indexer :: IndexerF c n m -> Indexer c n m
+
+type family IndexerF (c :: Cardinality) (n :: GHC.Nat) (m :: GHC.Nat) :: Type where
+  IndexerF 'One _ _ = ()
+  IndexerF 'Many n m = BoxedVector n (PrimArray (Index m))
+
+-- As we descend, the interpreter tweaks itself. Sort of. This
+-- does not yet have any special treatment for 0-or-1 values,
+-- but it could.
+data Blade ::
+    forall (fh :: Nat). -- Field height
+    forall (ph :: Nat). -- Prefix height
+    forall (mh :: Nat). -- Multi height
+    forall (k :: Type).
+    (Nat -> Vec fh Bool -> Type) -> -- Leaf Interpreter
+    (Cardinality -> k -> k -> Type) -> -- Index Interpretter, parent then child
+    Cardinality -> -- Cardinality
+    k -> -- Size, that is, number of elements per column
+    Meta fh ph mh ->
+    Type
+  where
+  Blade ::
+       ic card szParent szSelf -- This will look like: UnliftedVec m (PrimArray (Index n)), MaybeIndexArray m n, or Unit
+    -> Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) (i szSelf)) f 'VecNil
+    -> Tree @ph @'Zero @(Meta fh ph mh)
+         ( ApConst1
+           @(Meta fh ph mh) @(Vec ph Bool)
+           (Blade @fh @ph @mh i ic card szSelf)
+         )
+         p 'VecNil
+    -> Tree @mh @'Zero @(Meta fh ph mh)
+         ( ApConst1
+           @(Meta fh ph mh) @(Vec mh Bool)
+           (Blade @fh @ph @mh i ic 'Many szSelf)
+         )
+         m 'VecNil
+    -> Blade @fh @ph @mh i ic card szParent ('Meta f p m)
 
 -- A balanced tree that always has a base-two number of leaves. The
 -- type of the element at each position is determined by the interpretation
@@ -471,7 +523,7 @@ leftUnion (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap ::
   forall (fh :: Nat) (ph :: Nat) (n :: Nat)
   (w :: Vec n Bool)
-  (r :: Map (Meta fh ph) ph n) (s :: Map (Meta fh ph) ph n)
+  (r :: Map (Meta fh ph 'Zero) ph n) (s :: Map (Meta fh ph 'Zero) ph n)
   (i :: Vec fh Bool -> Type).
      Tree @ph @n (ApConst1 (Record i)) r w
   -> Tree @ph @n (ApConst1 (Record i)) s w
@@ -500,7 +552,7 @@ unionPrefixMap (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 
 unionRecord ::
   forall (h :: Nat) (n :: Nat)
-  (ml :: Meta h n) (mr :: Meta h n)
+  (ml :: Meta h n 'Zero) (mr :: Meta h n 'Zero)
   (i :: Vec h Bool -> Type).
      Record i ml
   -> Record i mr
@@ -573,14 +625,15 @@ type family Singleton (v :: Vec n Bool) (x :: Map k h n) :: Map k h 'Zero where
   Singleton ('VecCons 'True v) s =
     Singleton v ('MapRight s)
 
-type family UnionMeta (x :: Meta fh ph) (y :: Meta fh ph) :: Meta fh ph where
-  UnionMeta ('Meta fl pl) ('Meta fr pr) =
-    ('Meta (Union fl fr) (UnionPrefix pl pr))
+type family UnionMeta (x :: Meta fh ph mh) (y :: Meta fh ph mh) :: Meta fh ph mh where
+  UnionMeta ('Meta fl pl ml) ('Meta fr pr mr) =
+    ('Meta (Union fl fr) (UnionPrefix pl pr) (UnionPrefix ml mr))
 
 -- UnionPrefix is essentially a duplicate of Union. Without
 -- being able to partially apply type families, we have no
--- other good option.
-type family UnionPrefix (x :: Map (Meta fh ph) ph n) (y :: Map (Meta fh ph) ph n) :: Map (Meta fh ph) ph n where
+-- other good option. Notice that it is used for both standard
+-- prefixes and multi-prefixes.
+type family UnionPrefix (x :: Map (Meta fh ph mh) h n) (y :: Map (Meta fh ph mh) h n) :: Map (Meta fh ph mh) h n where
   UnionPrefix ('MapLeaf x) ('MapLeaf y) = 'MapLeaf (UnionMeta x y)
   UnionPrefix ('MapLeaf x) 'MapEmpty = 'MapLeaf x
   UnionPrefix 'MapEmpty s = s
