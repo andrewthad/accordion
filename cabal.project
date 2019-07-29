@@ -1,2 +1,3 @@
 packages: */*.cabal ../primitive-indexed
-with-compiler: ghc-8.6.4
+with-compiler: ghc-8.8.0.20190721
+allow-newer: *

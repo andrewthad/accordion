@@ -7,21 +7,56 @@ library universe
   build-depends:
     , base >= 4.11.1 && < 5
     , accordion-types
+    , lucid
+    , accordion-form-lucid
+    , text
   exposed-modules:
     Accordion.Example.Universe
+    Accordion.Example.FormImpl
     Accordion.Example.Types
   default-language: Haskell2010
   hs-source-dirs: src-universe
 
-library
+library ex-core
   build-depends:
     , base >= 4.11.1 && < 5
     , accordion-types
     , accordion-indefinite
     , universe
   hs-source-dirs: src
+  default-language: Haskell2010
   exposed-modules:
     Accordion.Example
   mixins:
     accordion-indefinite (Accordion.Record as Accordion.Example.Record)
-      requires (Accordion.Universe as Accordion.Example.Universe)
+      requires (Accordion.Universe as Accordion.Example.Universe),
+
+library ex-form
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , accordion-types
+    , accordion-form
+    , lucid
+    , universe
+  hs-source-dirs: src
+  default-language: Haskell2010
+  exposed-modules:
+    Accordion.FormExample
+  mixins:
+    accordion-form (Accordion.Form as Accordion.Example.Form)
+      requires
+      (Accordion.Universe as Accordion.Example.Universe,
+       Accordion.Form.Signature as Accordion.Example.FormImpl
+      )
+
+library
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , accordion-types
+    , ex-core
+    , ex-form
+    , universe
+    , lucid
+  default-language: Haskell2010
+  hs-source-dirs: src-complete
+  exposed-modules: Accordion.Complete

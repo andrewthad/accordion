@@ -2,10 +2,11 @@
 {-# language KindSignatures #-}
 {-# language TypeFamilies #-}
 {-# language TypeOperators #-}
+{-# language GADTSyntax #-}
 
 signature Accordion.Universe where
 
-import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger)
+import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger,SetFin,Tree)
 import Accordion.World (World(..),Primitive,SingWorld,GroundPrimitive)
 import Control.Monad.ST (ST)
 import Data.Kind (Type)
@@ -18,11 +19,18 @@ data Field :: Type
 data SingField :: Field -> Type
 data Universe :: Type
 data SingUniverse :: Universe -> Type
-type family Index (d :: Field) :: Vec Height Bool where ..
-type family Interpret (v :: Vec Height Bool) :: Universe where ..
 
 data Extra :: Type
 data SingExtra :: Extra -> Type
+
+-- newtype Record :: (Type -> Type) -> SetFin Height 'Zero -> Type where
+--   Record :: Tree Height 'Zero (Interpreted f) s 'VecNil -> Record f s
+-- 
+-- newtype Interpreted :: (Type -> Type) -> Vec Height Bool -> Type where
+--   Interpreted :: f (Ground (Interpret v)) -> Interpreted f v
+
+type family Index (d :: Field) :: Vec Height Bool where ..
+type family Interpret (v :: Vec Height Bool) :: Universe where ..
 type family InterpretExtra (e :: Extra) :: Type where ..
 
 -- Convert a universe to the user-facing type

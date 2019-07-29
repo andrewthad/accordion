@@ -1,0 +1,11 @@
+signature Accordion.Form.Signature where
+
+import Accordion.Universe (Height,Index,Ground,Interpret)
+import Accordion.Types (Finger)
+import Accordion.Types.Form (Form)
+
+data Html
+
+instance Monoid Html
+
+input :: Finger Height v -> Form Html (Ground (Interpret v))

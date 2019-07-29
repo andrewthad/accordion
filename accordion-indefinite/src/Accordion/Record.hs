@@ -14,14 +14,22 @@
 module Accordion.Record
   ( -- Data types
     Record(..)
+  , Template(..)
+  , Interpreted(..)
+  , Tree(..)
+  , Elem(..)
   , Records
   , Value(..)
-    -- Functions
+    -- Construction
   , empty
   , singleton
   , leftUnion
   , (&>)
   , (<.>)
+    -- Accessors
+  , get
+    -- Mapping
+  , traverse
     -- Vector
   , one
   , toStructures
@@ -33,10 +41,10 @@ module Accordion.Record
   , FromList
   ) where
 
-import Prelude hiding (filter)
+import Prelude hiding (filter,traverse)
 
 import Accordion.Types (Nat(..),Vec(..),SetFin(..),Finger(..))
-import Accordion.Types (Tree(..),Gte(GteEq),Omnitree(..))
+import Accordion.Types (Gte(GteEq),Omnitree(..))
 import Accordion.Types (omnibuild,omnifoldr)
 import Accordion.Universe (Height,Interpret,Ground,Interpret)
 import Accordion.Universe (SingField,Index,Field,Extra)
@@ -59,12 +67,30 @@ import qualified Data.Primitive as PM
 import qualified Accordion.World as W
 
 newtype Record :: (Type -> Type) -> SetFin Height 'Zero -> Type where
-  Record :: Tree Height 'Zero (Interpreted f) s 'VecNil -> Record f s
+  Record :: A.Tree Height 'Zero (Interpreted f) s 'VecNil -> Record f s
+
+newtype Tree :: (Vec Height Bool -> Type) -> SetFin Height 'Zero -> Type where
+  Tree :: A.Tree Height 'Zero f s 'VecNil -> Tree f s
+
+newtype Elem :: Vec Height Bool -> SetFin Height 'Zero -> Type where
+  Elem :: A.Elem Height 'Zero v 'VecNil s -> Elem v s
+
+newtype Template :: (Type -> Type) -> Type where
+  Template :: A.Omnitree Height 'A.Zero (Interpreted f) 'A.VecNil -> Template f
 
 data Records :: SetFin Height 'Zero -> Type where
   Records :: !Int -- Number of rows
-          -> Tree Height 'Zero Vectorized s 'VecNil -- Columns
+          -> A.Tree Height 'Zero Vectorized s 'VecNil -- Columns
           -> Records s
+
+data OptionalRecords :: SetFin Height 'Zero -> Type where
+  OptionalRecords ::
+       !Int -- Number of rows
+    -> A.Tree Height 'Zero OptionalVectorized s 'VecNil -- Columns
+    -> OptionalRecords s
+
+newtype Interpreted :: (Type -> Type) -> Vec Height Bool -> Type where
+  Interpreted :: f (Ground (Interpret v)) -> Interpreted f v
 
 instance Semigroup (Records rs) where
   Records n1 t1 <> Records n2 t2 = Records (n1 + n2) $ A.zip
@@ -103,16 +129,23 @@ filter (Record r) (Records n s) =
 data Value :: (Type -> Type) -> Field -> Type where
   Value :: SingField d -> f (Ground (Interpret (Index d))) -> Value f d
 
+-- TODO: Figure out how to not make this an orphan instance.
+-- We might need to do the explicit wrap/unwrap thing for this
+-- to be possible.
 instance Show1 f => Show (Record f s) where
   -- Is the number in the showParen predicate supposed to
   -- be 7 or 8? Not sure.
   showsPrec p (Record t) = showParen (p > 7) (showsRecord t . showString "empty")
 
-newtype Interpreted :: (Type -> Type) -> Vec Height Bool -> Type where
-  Interpreted :: f (Ground (Interpret v)) -> Interpreted f v
-
 newtype Vectorized :: Vec Height Bool -> Type where
   Vectorized :: Vectorize (Represent (Interpret v)) -> Vectorized v
+
+-- Invariant: The two vectors have the same length.
+data OptionalVectorized :: Vec Height Bool -> Type where
+  OptionalVectorized ::
+       PrimArray Word8
+    -> Vectorize (Represent (Interpret v))
+    -> OptionalVectorized v
 
 -- The first field is the String representation of the
 -- value-level field.
@@ -135,7 +168,7 @@ showsPrecOmnitree = omnibuild singHeight
 -- to something, but we should be sure that this number matches the
 -- precedence of the actual infix operator.
 showsRecord :: Show1 f
-  => Tree Height 'Zero (Interpreted f) s 'VecNil
+  => A.Tree Height 'Zero (Interpreted f) s 'VecNil
   -> ShowS
 showsRecord t s0 = omnifoldr
   showsPrecOmnitree
@@ -156,6 +189,26 @@ type Union (rs :: SetFin Height 'Zero) (ss :: SetFin Height 'Zero) =
 type family FromList (xs :: [Field]) :: SetFin Height 'Zero where
   FromList '[] = 'SetFinEmpty
   FromList (x ': xs) = Union (Singleton (Index x)) (FromList xs)
+
+get ::
+     Elem r rs
+  -> Record Identity rs
+  -> Ground (Interpret r)
+get (Elem e) (Record t) =
+  let Interpreted (Identity x) = A.get e t
+   in x
+
+traverse :: forall (f :: Type -> Type) (g :: Type -> Type) (h :: Type -> Type) (rs :: SetFin Height 'Zero).
+     Applicative h
+  => (forall x. f x -> h (g x))
+  -> Record f rs 
+  -> h (Record g rs)
+traverse p (Record r) = fmap Record
+  ( A.traverseF q r
+  )
+  where
+  q :: Interpreted f v -> h (Interpreted g v)
+  q (Interpreted v) = fmap Interpreted (p v)
 
 singleton ::
      SingField d
@@ -273,10 +326,10 @@ toStructures (Records n tree) = runST $ do
 
 -- summarize :: 
 --      Record Proxy gs
---   -> Record (Elem)
+--   -> Tree (Elem rs) as
 --   -> Records rs
 --   -> Records (Union gs as)
--- summarize 
+-- summarize (Record _) (Tree _) _ = Records
 
 tabulate :: Records rs -> IO ()
 tabulate = mapM_ print . toStructures

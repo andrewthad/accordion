@@ -1,0 +1,19 @@
+cabal-version: 2.2
+name: accordion-form-lucid
+version: 0.1.0.0
+build-type: Simple
+
+library
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , accordion-types
+    , primitive-checked >= 0.6.4
+    , text
+    , lucid
+  exposed-modules:
+    Accordion.Form.Lucid
+    Accordion.Form.Parse
+  default-language: Haskell2010
+  ghc-options: -Wall
+  hs-source-dirs: src
+
