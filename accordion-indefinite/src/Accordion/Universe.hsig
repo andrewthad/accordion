@@ -6,7 +6,7 @@
 
 signature Accordion.Universe where
 
-import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger,SetFin,Tree)
+import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger,Map,Tree)
 import Accordion.World (World(..),Primitive,SingWorld,GroundPrimitive)
 import Control.Monad.ST (ST)
 import Data.Kind (Type)
@@ -14,7 +14,9 @@ import Data.Type.Equality ((:~:))
 import Data.Primitive (MutablePrimArray,PrimArray)
 import Data.Word (Word8)
 
-data Height :: Nat
+data FieldHeight :: Nat
+data PrefixHeight :: Nat
+data ManyHeight :: Nat
 data Field :: Type
 data SingField :: Field -> Type
 data Universe :: Type
@@ -23,14 +25,8 @@ data SingUniverse :: Universe -> Type
 data Extra :: Type
 data SingExtra :: Extra -> Type
 
--- newtype Record :: (Type -> Type) -> SetFin Height 'Zero -> Type where
---   Record :: Tree Height 'Zero (Interpreted f) s 'VecNil -> Record f s
--- 
--- newtype Interpreted :: (Type -> Type) -> Vec Height Bool -> Type where
---   Interpreted :: f (Ground (Interpret v)) -> Interpreted f v
-
-type family Index (d :: Field) :: Vec Height Bool where ..
-type family Interpret (v :: Vec Height Bool) :: Universe where ..
+type family FieldIndex (d :: Field) :: Vec FieldHeight Bool where ..
+type family Interpret (v :: Vec FieldHeight Bool) :: Universe where ..
 type family InterpretExtra (e :: Extra) :: Type where ..
 
 -- Convert a universe to the user-facing type
@@ -44,11 +40,11 @@ represent :: SingUniverse u -> SingWorld SingExtra (Represent u)
 
 -- This function is weird. There must be a better way.
 -- No, there is not.
-showIndexField :: Finger Height v -> String
+showIndexField :: Finger FieldHeight v -> String
 
-singHeight :: SingNat Height
-index :: SingField d -> Finger Height (Index d)
-interpret :: Finger Height v -> SingUniverse (Interpret v)
+singFieldHeight :: SingNat FieldHeight
+index :: SingField d -> Finger FieldHeight (FieldIndex d)
+interpret :: Finger FieldHeight v -> SingUniverse (Interpret v)
 showsPrecUniverse :: SingUniverse u -> Int -> Ground u -> ShowS
 
 eqExtra :: SingExtra e -> InterpretExtra e -> InterpretExtra e -> Bool

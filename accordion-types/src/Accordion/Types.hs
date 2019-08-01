@@ -7,8 +7,9 @@
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language TypeApplications #-}
-{-# language TypeInType #-}
 {-# language TypeFamilies #-}
+{-# language TypeInType #-}
+{-# language TypeOperators #-}
 {-# language UndecidableInstances #-}
 
 module Accordion.Types
@@ -18,10 +19,13 @@ module Accordion.Types
   , Fin(..)
   , Cardinality(..)
   , Blade(..)
+  , Indexer(..)
   , Gte(..)
   , ApConst1(..)
   , ApConst2(..)
   , Meta(..)
+  , MetaEmpty
+  , MetaFields
   , Map(..)
   , Record(..)
   , SingGte(..)
@@ -33,6 +37,7 @@ module Accordion.Types
   , Finger(..)
   , SingBool(..)
   , Elem(..)
+  , FieldList
     -- data types for instances
     -- type families
   , Empty
@@ -62,10 +67,11 @@ import Prelude hiding (map,zip,traverse,foldMap)
 import Control.Applicative (liftA2)
 import Data.Kind (Type)
 import Data.Void (Void,absurd)
-import Data.Primitive (PrimArray)
-import Vector.Types (Index)
+import Data.Primitive (Array)
 
-import Vector.Boxed (BoxedVector)
+import Data.Index (Index)
+import Data.Array.Indexed (Vector)
+import qualified Data.Arithmetic.Types as Arithmetic
 import qualified GHC.TypeNats as GHC
 
 -- newtype Shown :: Type -> Type where
@@ -92,6 +98,9 @@ data Meta :: Nat -> Nat -> Nat -> Type where
     -> Map (Meta fh ph mh) ph 'Zero
     -> Map (Meta fh ph mh) mh 'Zero
     -> Meta fh ph mh
+
+type MetaEmpty = 'Meta 'MapEmpty 'MapEmpty 'MapEmpty
+type MetaFields x = 'Meta x 'MapEmpty 'MapEmpty
 
 -- A finite set. The first number is the total height (total possible
 -- size is 2^h). The second number is how far down from the root
@@ -202,7 +211,7 @@ newtype Indexer :: Cardinality -> GHC.Nat -> GHC.Nat -> Type where
 
 type family IndexerF (c :: Cardinality) (n :: GHC.Nat) (m :: GHC.Nat) :: Type where
   IndexerF 'One _ _ = ()
-  IndexerF 'Many n m = BoxedVector n (PrimArray (Index m))
+  IndexerF 'Many n m = (Arithmetic.Nat m, Vector n (Array (Index m)))
 
 -- As we descend, the interpreter tweaks itself. Sort of. This
 -- does not yet have any special treatment for 0-or-1 values,
@@ -212,15 +221,31 @@ data Blade ::
     forall (ph :: Nat). -- Prefix height
     forall (mh :: Nat). -- Multi height
     forall (k :: Type).
-    (Nat -> Vec fh Bool -> Type) -> -- Leaf Interpreter
+    (k -> Vec fh Bool -> Type) -> -- Leaf Interpreter
     (Cardinality -> k -> k -> Type) -> -- Index Interpretter, parent then child
-    Cardinality -> -- Cardinality
+    Cardinality -> -- Cardinality (sort of parent related)
     k -> -- Size, that is, number of elements per column
     Meta fh ph mh ->
     Type
   where
-  Blade ::
-       ic card szParent szSelf -- This will look like: UnliftedVec m (PrimArray (Index n)), MaybeIndexArray m n, or Unit
+  Blade :: forall
+    (fh :: Nat) -- Field height
+    (ph :: Nat) -- Prefix height
+    (mh :: Nat) -- Multi height
+    (k :: Type)
+    (i :: (k -> Vec fh Bool -> Type))
+    (ic :: (Cardinality -> k -> k -> Type))
+    (card :: Cardinality) -- Cardinality (sort of parent related)
+    (szParent :: k) -- Size, that is, number of elements per column
+    (szSelf :: k) -- Child size
+    (f :: Map () fh 'Zero)
+    (p :: Map (Meta fh ph mh) ph 'Zero)
+    (m :: Map (Meta fh ph mh) mh 'Zero).
+       ic card szParent szSelf
+       -- This will look like:
+       -- * UnliftedVec szParent (PrimArray (Index szSelf))
+       -- * MaybeIndexArray szParent szSelf
+       -- * Unit
     -> Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) (i szSelf)) f 'VecNil
     -> Tree @ph @'Zero @(Meta fh ph mh)
          ( ApConst1
@@ -234,7 +259,7 @@ data Blade ::
            (Blade @fh @ph @mh i ic 'Many szSelf)
          )
          m 'VecNil
-    -> Blade @fh @ph @mh i ic card szParent ('Meta f p m)
+    -> Blade @fh @ph @mh @k i ic card szParent ('Meta f p m)
 
 -- A balanced tree that always has a base-two number of leaves. The
 -- type of the element at each position is determined by the interpretation
@@ -343,7 +368,9 @@ singleton ::
      forall (h :: Nat) (n :: Nat) (k :: Type) (v :: Vec h Bool)
             (w :: Vec n Bool) (s :: Map k h n) (i :: k -> Vec h Bool -> Type).
      Finger n w -- Finger to node under consideration
-  -> Finger h v -- Finger to singleton leaf node, does not change while recursing
+  -> Finger h v
+     -- Finger to singleton leaf node, does not change while recursing.
+     -- Why is this argument even necessary. I am not sure that it is.
   -> Tree @h @n i s w
   -> Tree @h @'Zero i (Singleton w s) 'VecNil
 singleton FingerNil _ s = s
@@ -434,16 +461,16 @@ foldMapF f (TreeBranch a b) = foldMapF f a <> foldMapF f b
 -- Requires the two trees to match exactly. It is possible to provide
 -- a variant that does not require an exact match. Such a function would
 -- use Union in the result type.
-zip :: forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: Map () h n)
-     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type)
-     (k :: Vec h Bool -> Type).
-     (forall (v :: Vec h Bool). Finger h v -> i v -> j v -> k v)
+zip :: forall (h :: Nat) (n :: Nat) (z :: Type) (w :: Vec n Bool) (r :: Map z h n)
+     (i :: z -> Vec h Bool -> Type) (j :: z -> Vec h Bool -> Type)
+     (k :: z -> Vec h Bool -> Type).
+     (forall (v :: Vec h Bool) (y :: z). Finger h v -> i y v -> j y v -> k y v)
   -> Finger n w -- finger to the current nodes
-  -> Tree @h @n (ApConst2 i) r w -- left tree
-  -> Tree @h @n (ApConst2 j) r w -- right tree
-  -> Tree @h @n (ApConst2 k) r w -- result tree
+  -> Tree @h @n i r w -- left tree
+  -> Tree @h @n j r w -- right tree
+  -> Tree @h @n k r w -- result tree
 zip _ !_ TreeEmpty TreeEmpty = TreeEmpty
-zip f !v (TreeLeaf (ApConst2 x)) (TreeLeaf (ApConst2 y)) = TreeLeaf (ApConst2 (f v x y))
+zip f !v (TreeLeaf x) (TreeLeaf y) = TreeLeaf (f v x y)
 zip f !v (TreeLeft x) (TreeLeft y) = TreeLeft $! zip f (FingerCons SingFalse v) x y
 zip f !v (TreeRight x) (TreeRight y) = TreeRight $! zip f (FingerCons SingTrue v) x y
 zip f !v (TreeBranch xl xr) (TreeBranch yl yr) =
@@ -624,6 +651,10 @@ type family Singleton (v :: Vec n Bool) (x :: Map k h n) :: Map k h 'Zero where
     Singleton v ('MapLeft s)
   Singleton ('VecCons 'True v) s =
     Singleton v ('MapRight s)
+
+type family FieldList (xs :: [Vec h Bool]) :: Map () h 'Zero where
+  FieldList '[] = 'MapEmpty
+  FieldList (x ': xs) = Union (Singleton x ('MapLeaf '())) (FieldList xs)
 
 type family UnionMeta (x :: Meta fh ph mh) (y :: Meta fh ph mh) :: Meta fh ph mh where
   UnionMeta ('Meta fl pl ml) ('Meta fr pr mr) =

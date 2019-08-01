@@ -38,20 +38,20 @@ module Accordion.Record
     -- Type families
   , Singleton
   , Union
-  , FromList
+  -- , FromList
   ) where
 
 import Prelude hiding (filter,traverse)
 
-import Accordion.Types (Nat(..),Vec(..),SetFin(..),Finger(..))
+import Accordion.Types (Nat(..),Vec(..),Map(..),Finger(..))
 import Accordion.Types (Gte(GteEq),Omnitree(..))
 import Accordion.Types (omnibuild,omnifoldr)
-import Accordion.Universe (Height,Interpret,Ground,Interpret)
-import Accordion.Universe (SingField,Index,Field,Extra)
-import Accordion.Universe (singHeight,showsPrecUniverse,interpret,index)
+import Accordion.Universe (FieldHeight,Interpret,Ground,Interpret)
+import Accordion.Universe (SingField,FieldIndex,Field,Extra)
+import Accordion.Universe (singFieldHeight,showsPrecUniverse,interpret,index)
 import Accordion.Universe (showIndexField,InterpretExtra,SingExtra,eqExtra)
 import Accordion.Universe (Represent,represent,toInternal,fromInternal)
-import Accordion.Universe (GroundWorld)
+import Accordion.Universe (GroundWorld,ManyHeight,PrefixHeight)
 import Control.Monad.ST (ST,runST)
 import Data.Functor.Classes (Show1,liftShowsPrec)
 import Data.Functor.Identity (Identity(..))
@@ -66,30 +66,36 @@ import qualified Accordion.Vector as V
 import qualified Data.Primitive as PM
 import qualified Accordion.World as W
 
-newtype Record :: (Type -> Type) -> SetFin Height 'Zero -> Type where
-  Record :: A.Tree Height 'Zero (Interpreted f) s 'VecNil -> Record f s
+newtype Record :: (Type -> Type) -> Map () FieldHeight 'Zero -> Type where
+  Record ::
+       A.Tree @FieldHeight @'Zero (A.ApConst2 (Interpreted f)) s 'VecNil
+    -> Record f s
 
-newtype Tree :: (Vec Height Bool -> Type) -> SetFin Height 'Zero -> Type where
-  Tree :: A.Tree Height 'Zero f s 'VecNil -> Tree f s
+newtype Tree ::
+    (Vec FieldHeight Bool -> Type) ->
+    Meta FieldHeight PrefixHeight ManyHeight ->
+    Type
+  where
+  Tree :: A.Tree FieldHeight 'Zero f s 'VecNil -> Tree f s
 
-newtype Elem :: Vec Height Bool -> SetFin Height 'Zero -> Type where
-  Elem :: A.Elem Height 'Zero v 'VecNil s -> Elem v s
+newtype Elem :: Vec FieldHeight Bool -> Map () FieldHeight 'Zero -> Type where
+  Elem :: A.Elem @FieldHeight @'Zero v 'VecNil s -> Elem v s
 
 newtype Template :: (Type -> Type) -> Type where
-  Template :: A.Omnitree Height 'A.Zero (Interpreted f) 'A.VecNil -> Template f
+  Template :: A.Omnitree FieldHeight 'A.Zero (Interpreted f) 'A.VecNil -> Template f
 
-data Records :: SetFin Height 'Zero -> Type where
+data Records :: Map () FieldHeight 'Zero -> Type where
   Records :: !Int -- Number of rows
-          -> A.Tree Height 'Zero Vectorized s 'VecNil -- Columns
+          -> A.Tree FieldHeight 'Zero Vectorized s 'VecNil -- Columns
           -> Records s
 
-data OptionalRecords :: SetFin Height 'Zero -> Type where
-  OptionalRecords ::
-       !Int -- Number of rows
-    -> A.Tree Height 'Zero OptionalVectorized s 'VecNil -- Columns
-    -> OptionalRecords s
+-- data OptionalRecords :: SetFin Height 'Zero -> Type where
+--   OptionalRecords ::
+--        !Int -- Number of rows
+--     -> A.Tree Height 'Zero OptionalVectorized s 'VecNil -- Columns
+--     -> OptionalRecords s
 
-newtype Interpreted :: (Type -> Type) -> Vec Height Bool -> Type where
+newtype Interpreted :: (Type -> Type) -> Vec FieldHeight Bool -> Type where
   Interpreted :: f (Ground (Interpret v)) -> Interpreted f v
 
 instance Semigroup (Records rs) where
@@ -127,7 +133,7 @@ filter (Record r) (Records n s) =
    in Records total t
 
 data Value :: (Type -> Type) -> Field -> Type where
-  Value :: SingField d -> f (Ground (Interpret (Index d))) -> Value f d
+  Value :: SingField d -> f (Ground (Interpret (FieldIndex d))) -> Value f d
 
 -- TODO: Figure out how to not make this an orphan instance.
 -- We might need to do the explicit wrap/unwrap thing for this
@@ -137,58 +143,60 @@ instance Show1 f => Show (Record f s) where
   -- be 7 or 8? Not sure.
   showsPrec p (Record t) = showParen (p > 7) (showsRecord t . showString "empty")
 
-newtype Vectorized :: Vec Height Bool -> Type where
+newtype Vectorized :: Vec FieldHeight Bool -> Type where
   Vectorized :: Vectorize (Represent (Interpret v)) -> Vectorized v
 
 -- Invariant: The two vectors have the same length.
-data OptionalVectorized :: Vec Height Bool -> Type where
-  OptionalVectorized ::
-       PrimArray Word8
-    -> Vectorize (Represent (Interpret v))
-    -> OptionalVectorized v
+-- data OptionalVectorized :: Vec Height Bool -> Type where
+--   OptionalVectorized ::
+--        PrimArray Word8
+--     -> Vectorize (Represent (Interpret v))
+--     -> OptionalVectorized v
 
 -- The first field is the String representation of the
 -- value-level field.
-data Shown :: Vec Height Bool -> Type where
-  Shown ::
-       String
-    -> (Int -> Ground (Interpret v) -> ShowS)
-    -> Shown v
+-- data Shown :: Vec Height Bool -> Type where
+--   Shown ::
+--        String
+--     -> (Int -> Ground (Interpret v) -> ShowS)
+--     -> Shown v
 
 -- A tree with value-showing functions.
-showsPrecOmnitree :: Omnitree Height 'Zero Shown 'VecNil
-showsPrecOmnitree = omnibuild singHeight
-  (\v -> Shown
-    (showIndexField v)
-    (\p i -> showsPrecUniverse (interpret v) p i
-    )
-  )
+-- showsPrecOmnitree :: Omnitree Height 'Zero Shown 'VecNil
+-- showsPrecOmnitree = omnibuild singHeight
+--   (\v -> Shown
+--     (showIndexField v)
+--     (\p i -> showsPrecUniverse (interpret v) p i
+--     )
+--   )
 
 -- TODO: Quit hard-coding the precedence. It has to get hard-coded
 -- to something, but we should be sure that this number matches the
 -- precedence of the actual infix operator.
-showsRecord :: Show1 f
-  => A.Tree Height 'Zero (Interpreted f) s 'VecNil
-  -> ShowS
-showsRecord t s0 = omnifoldr
-  showsPrecOmnitree
-  (\(Shown field sh) (Interpreted i) s -> showString "Value "
-    . showString field
-    . showChar ' '
-    . liftShowsPrec sh (showList__ (sh 0)) 11 i
-    $ (" &> " ++ s)
-  )
-  s0 t
+-- showsRecord :: Show1 f
+--   => A.Tree Height 'Zero (Interpreted f) s 'VecNil
+--   -> ShowS
+-- showsRecord t s0 = omnifoldr
+--   showsPrecOmnitree
+--   (\(Shown field sh) (Interpreted i) s -> showString "Value "
+--     . showString field
+--     . showChar ' '
+--     . liftShowsPrec sh (showList__ (sh 0)) 11 i
+--     $ (" &> " ++ s)
+--   )
+--   s0 t
 
-type Singleton (v :: Vec Height Bool) =
-  A.Singleton Height Height v 'SetFinLeaf 'GteEq
+-- type Singleton (v :: Vec Height Bool) =
+--   A.Singleton Height Height v 'SetFinLeaf 'GteEq
 
-type Union (rs :: SetFin Height 'Zero) (ss :: SetFin Height 'Zero) =
-  A.Union Height 'Zero rs ss
+-- type Union (rs :: SetFin Height 'Zero) (ss :: SetFin Height 'Zero) =
+--   A.Union FieldHeight 'Zero rs ss
 
-type family FromList (xs :: [Field]) :: SetFin Height 'Zero where
-  FromList '[] = 'SetFinEmpty
-  FromList (x ': xs) = Union (Singleton (Index x)) (FromList xs)
+type Meta = A.Meta FieldHeight PrefixHeight ManyHeight
+
+-- type family FromList (xs :: [Field]) :: SetFin Height 'Zero where
+--   FromList '[] = 'SetFinEmpty
+--   FromList (x ': xs) = Union (Singleton (FieldIndex x)) (FromList xs)
 
 get ::
      Elem r rs
@@ -198,7 +206,7 @@ get (Elem e) (Record t) =
   let Interpreted (Identity x) = A.get e t
    in x
 
-traverse :: forall (f :: Type -> Type) (g :: Type -> Type) (h :: Type -> Type) (rs :: SetFin Height 'Zero).
+traverse :: forall (f :: Type -> Type) (g :: Type -> Type) (h :: Type -> Type) (rs :: Meta).
      Applicative h
   => (forall x. f x -> h (g x))
   -> Record f rs 
@@ -210,27 +218,27 @@ traverse p (Record r) = fmap Record
   q :: Interpreted f v -> h (Interpreted g v)
   q (Interpreted v) = fmap Interpreted (p v)
 
-singleton ::
-     SingField d
-  -> f (Ground (Interpret (Index d)))
-  -> Record f (Singleton (Index d))
-singleton field value = Record (A.singleton A.SingGteEq finger finger (A.TreeLeaf (Interpreted value)))
-  where
-  finger = index field
+-- singleton ::
+--      SingField d
+--   -> f (Ground (Interpret (FieldIndex d)))
+--   -> Record f (Singleton (FieldIndex d))
+-- singleton field value = Record (A.singleton A.SingGteEq finger finger (A.TreeLeaf (Interpreted value)))
+--   where
+--   finger = index field
 
-leftUnion :: Record f rs -> Record f ss -> Record f (Union rs ss)
-leftUnion (Record xs) (Record ys) = Record (A.leftUnion xs ys)
+-- leftUnion :: Record f rs -> Record f ss -> Record f (Union rs ss)
+-- leftUnion (Record xs) (Record ys) = Record (A.leftUnion xs ys)
 
 -- TODO: Should users be required to define this on their own?
-(<.>) :: Record f rs -> Record f ss -> Record f (Union rs ss)
-(<.>) = leftUnion
+-- (<.>) :: Record f rs -> Record f ss -> Record f (Union rs ss)
+-- (<.>) = leftUnion
 
-empty :: Record f 'SetFinEmpty
+empty :: Record f A.MetaEmpty
 empty = Record A.empty
 
-infixr 7 &>
-(&>) :: Value f d -> Record f rs -> Record f (Union (Singleton (Index d)) rs)
-Value d v &> rs = leftUnion (singleton d v) rs
+-- infixr 7 &>
+-- (&>) :: Value f d -> Record f rs -> Record f (Union (Singleton (FieldIndex d)) rs)
+-- Value d v &> rs = leftUnion (singleton d v) rs
 
 type family Vectorize (w :: World Extra) :: Type where
   Vectorize ('W.Primitive p) = W.VectorizePrimitive p

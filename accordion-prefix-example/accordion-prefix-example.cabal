@@ -23,5 +23,8 @@ library
   build-depends:
     , base >=4.12.0.0 && <5
     , accordion-types
+    , primitive-indexed
+    , primitive
+    , indexed-array
   hs-source-dirs:      src
   default-language:    Haskell2010
