@@ -65,14 +65,6 @@ dogs (Blades n x) = MyBlade $ Blade TreeEmpty TreeEmpty
     (TreeLeaf (ApConst1 (Collection n (V.singleton (ascendingArray n)) x)))
   )
 
-dog :: Record f m
-  -> Record f ('Meta 'MapEmpty (Singleton (IndexPrefix 'Dog) ('MapLeaf m)) 'MapEmpty)
-dog r = Record TreeEmpty
-  (singleton
-    (indexPrefix SingDog)
-    (TreeLeaf (ApConst1 r))
-  )
-
 union :: MyBlade r -> MyBlade s -> MyBlade (UnionMeta r s)
 union (MyBlade x) (MyBlade y) = MyBlade (A.unionBlade x y)
 

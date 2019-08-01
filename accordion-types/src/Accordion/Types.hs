@@ -17,10 +17,8 @@ module Accordion.Types
     Nat(..)
   , SingNat(..)
   , Fin(..)
-  , Cardinality(..)
   , Collection(..)
   , Blade(..)
-  , Indexer(..)
   , Gte(..)
   , ApConst1(..)
   , ApConst2(..)
@@ -28,7 +26,6 @@ module Accordion.Types
   , MetaEmpty
   , MetaFields
   , Map(..)
-  , Record(..)
   , SingGte(..)
   , Vec(..)
   , Set(..)
@@ -190,31 +187,6 @@ newtype ApConst1 :: forall (a :: Type) (b :: Type). (a -> Type) -> a -> b -> Typ
   ApConst1 :: forall (a :: Type) (b :: Type) (x :: a) (y :: b) (f :: a -> Type).
     f x -> ApConst1 @a @b f x y
 
-data Record :: 
-    forall (fh :: Nat). -- Field height
-    forall (ph :: Nat). -- Prefix height
-    (Vec fh Bool -> Type) -> -- Interpreter
-    Meta fh ph 'Zero ->
-    Type
-  where
-  Record ::
-       Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) i) f 'VecNil
-    -> Tree @ph @'Zero @(Meta fh ph 'Zero)
-         (ApConst1 @(Meta fh ph 'Zero) @(Vec ph Bool) (Record @fh @ph i))
-         p 'VecNil
-    -> Record @fh @ph i ('Meta f p 'MapEmpty)
-
-data Cardinality
-  = One
-  | Many
-
-newtype Indexer :: Cardinality -> GHC.Nat -> GHC.Nat -> Type where
-  Indexer :: IndexerF c n m -> Indexer c n m
-
-type family IndexerF (c :: Cardinality) (n :: GHC.Nat) (m :: GHC.Nat) :: Type where
-  IndexerF 'One _ _ = ()
-  IndexerF 'Many n m = (Arithmetic.Nat m, Vector n (Array (Index m)))
-
 data Collection ::
     forall (fh :: Nat). -- Field height
     forall (ph :: Nat). -- Prefix height
@@ -234,9 +206,9 @@ data Collection ::
 -- does not yet have any special treatment for 0-or-1 values,
 -- but it could.
 data Blade ::
-    forall (fh :: Nat). -- Field height
-    forall (ph :: Nat). -- Prefix height
-    forall (mh :: Nat). -- Multi height
+    forall (fh :: Nat) -- Field height
+           (ph :: Nat) -- Prefix height
+           (mh :: Nat). -- Multi height
     (GHC.Nat -> Vec fh Bool -> Type) -> -- Leaf Interpreter
     GHC.Nat -> -- Size, that is, number of elements per column
     Meta fh ph mh ->
@@ -251,11 +223,6 @@ data Blade ::
     (f :: Map () fh 'Zero)
     (p :: Map (Meta fh ph mh) ph 'Zero)
     (m :: Map (Meta fh ph mh) mh 'Zero).
-       -- ic card szParent szSelf
-       -- This will look like:
-       -- * UnliftedVec szParent (PrimArray (Index szSelf))
-       -- * MaybeIndexArray szParent szSelf
-       -- * Unit
        Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) (i sz)) f 'VecNil
     -> Tree @ph @'Zero @(Meta fh ph mh)
          ( ApConst1
@@ -583,16 +550,6 @@ unionPrefixMap (TreeLeft t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
-
--- unionRecord ::
---   forall (h :: Nat) (n :: Nat)
---   (ml :: Meta h n 'Zero) (mr :: Meta h n 'Zero)
---   (i :: Vec h Bool -> Type).
---      Record i ml
---   -> Record i mr
---   -> Record i (UnionMeta ml mr)
--- unionRecord (Record fl pl) (Record fr pr) =
---   Record (leftUnion fl fr) (unionPrefixMap pl pr)
 
 unionBlade ::
   forall (h :: Nat) (n :: Nat) (p :: Nat)
