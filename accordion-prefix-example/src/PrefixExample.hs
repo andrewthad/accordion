@@ -32,6 +32,7 @@ import qualified Data.Array.Indexed as V
 import qualified Data.Arithmetic.Nat as Nat
 import qualified Data.Index as Index
 import qualified Data.Primitive as PM
+import qualified Data.Arithmetic.Types as Arithmetic
 
 age' :: Int -> Tree
   (ApConst2 (Interpreted Identity))
@@ -40,24 +41,29 @@ age' :: Int -> Tree
 age' i = singleton (index SingAge) (index SingAge)
   (TreeLeaf (ApConst2 (Interpreted (Identity i))))
 
-alive' :: Bool -> Tree
-  (ApConst2 (Interpreted Identity))
-  (Singleton Alive ('MapLeaf '())) 'VecNil
-alive' i = singleton (index SingAlive) (index SingAlive)
-  (TreeLeaf (ApConst2 (Interpreted (Identity i))))
+alive :: Bool -> MyBlade (MetaFields (FieldList '[Alive]))
+alive i = MyBlade $ Blade
+  ( singleton (index SingAlive) (index SingAlive)
+    (TreeLeaf (ApConst2 (AsVec (V.singleton i))))
+  )
+  A.TreeEmpty
+  A.TreeEmpty
 
 age :: Int -> MyBlade (MetaFields (FieldList '[Age]))
 age i = MyBlade $ Blade
-  (Indexer ())
   ( singleton (index SingAge) (index SingAge)
     (TreeLeaf (ApConst2 (AsVec (V.singleton i))))
   )
   A.TreeEmpty
   A.TreeEmpty
 
-alive :: Bool -> Record (Interpreted Identity)
-  (MetaFields (FieldList '[Alive]))
-alive i = Record (alive' i) TreeEmpty
+dogs ::
+     Blades m
+  -> MyBlade ('Meta 'MapEmpty 'MapEmpty (Singleton Dogs ('MapLeaf m)))
+dogs (Blades n x) = MyBlade $ Blade TreeEmpty TreeEmpty
+  (A.singleton (indexMultiprefix SingDogs) (indexMultiprefix SingDogs)
+    (TreeLeaf (ApConst1 (Collection n (V.singleton (ascendingArray n)) x)))
+  )
 
 dog :: Record f m
   -> Record f ('Meta 'MapEmpty (Singleton (IndexPrefix 'Dog) ('MapLeaf m)) 'MapEmpty)
@@ -67,6 +73,9 @@ dog r = Record TreeEmpty
     (indexPrefix SingDog)
     (TreeLeaf (ApConst1 r))
   )
+
+union :: MyBlade r -> MyBlade s -> MyBlade (UnionMeta r s)
+union (MyBlade x) (MyBlade y) = MyBlade (A.unionBlade x y)
 
 data Field
   = Age
@@ -94,6 +103,10 @@ data SingPrefix :: Prefix -> Type where
   SingDog :: SingPrefix 'Dog
   SingCat :: SingPrefix 'Cat
 
+data SingMultiprefix :: Multiprefix -> Type where
+  SingDogs :: SingMultiprefix 'Dogs
+  SingCats :: SingMultiprefix 'Cats
+
 data Universe
   = Number
   | Character
@@ -120,8 +133,14 @@ type family IndexPrefix (p :: Prefix) :: Vec N1 Bool where
   IndexPrefix 'Dog = 'VecCons 'True 'VecNil
   IndexPrefix 'Cat = 'VecCons 'False 'VecNil
 
+type family IndexMulti (m :: Multiprefix) :: Vec N1 Bool where
+  IndexMulti 'Dogs = 'VecCons 'True 'VecNil
+  IndexMulti 'Cats = 'VecCons 'False 'VecNil
+
 type Alive = Index 'Alive
 type Age = Index 'Age
+type Dogs = IndexMulti 'Dogs
+type Cats = IndexMulti 'Cats
 
 newtype Interpreted :: (Type -> Type) -> Vec N2 Bool -> Type where
   Interpreted :: f (Ground (Interpret v)) -> Interpreted f v
@@ -164,6 +183,10 @@ indexPrefix :: SingPrefix p -> Finger N1 (IndexPrefix p)
 indexPrefix SingDog = FingerCons SingTrue FingerNil
 indexPrefix SingCat = FingerCons SingFalse FingerNil
 
+indexMultiprefix :: SingMultiprefix p -> Finger N1 (IndexMulti p)
+indexMultiprefix SingDogs = FingerCons SingTrue FingerNil
+indexMultiprefix SingCats = FingerCons SingFalse FingerNil
+
 interpret :: Finger N2 v -> SingUniverse (Interpret v)
 interpret f = case unindex f of
   SingAge -> SingNumber
@@ -193,20 +216,21 @@ newtype AsVec :: GHC.Nat -> Vec N2 Bool -> Type where
   AsVec :: AsVecFam n v -> AsVec n v
 
 newtype MyBlade :: Meta N2 N1 N1 -> Type where
-  MyBlade :: Blade @N2 @N1 @N1 @GHC.Nat AsVec Indexer 'One 1 m -> MyBlade m
+  MyBlade :: Blade @N2 @N1 @N1 AsVec 1 m -> MyBlade m
 
 data Blades :: Meta N2 N1 N1 -> Type where
   Blades ::
-       Blade @N2 @N1 @N1 @GHC.Nat AsVec Indexer 'Many n m
+       Arithmetic.Nat n
+    -> Blade @N2 @N1 @N1 AsVec n m
     -> Blades m
 
 instance Semigroup (Blades m) where
-  Blades a <> Blades b = Blades
+  Blades x a <> Blades y b = Blades (Nat.plus x y)
     (getMyBlades (appendMyBlades (MyBlades a) (MyBlades b)))
 
 newtype MyBlades :: GHC.Nat -> Meta N2 N1 N1 -> Type where
   MyBlades ::
-    { getMyBlades :: Blade @N2 @N1 @N1 @GHC.Nat AsVec Indexer 'Many n m
+    { getMyBlades :: Blade @N2 @N1 @N1 AsVec n m
     } -> MyBlades n m
 
 concatBlades :: NonEmpty (MyBlade m) -> Blades m
@@ -214,40 +238,53 @@ concatBlades = sconcat . fmap singletonBlades
 
 singletonBlades :: MyBlade m -> Blades m
 singletonBlades (MyBlade m) = case m of
-  Blade (Indexer ()) x _ _ -> Blades $ Blade 
-    (Indexer (Nat.one,V.singleton (singletonArray (Index.i01))))
-    (_ x)
-    (error "hutoenhu")
-    (error "hutoenhu")
+  Blade x y z -> Blades Nat.one (Blade x y z)
 
 appendMyBlades :: forall na nb m.
   MyBlades na m -> MyBlades nb m -> MyBlades (na + nb) m
 appendMyBlades
-  (MyBlades (Blade (Indexer (x1,a1)) b1 c1 d1))
-  (MyBlades (Blade (Indexer (x2,a2)) b2 c2 d2)) =
-  let sza1 = V.length a1
-      sza2 = V.length a2
-  in
-  MyBlades $ Blade @N2 @N1 @N1 @GHC.Nat @AsVec @Indexer @'Many
-                   @(na + nb)
-    ( Indexer
-      ( Nat.plus x1 x2
-      , V.append
-        (fmap (fmap (Index.incrementLimitR x2)) a1)
-        (fmap (fmap (\i -> Index.incrementL x1 i)) a2)
-      )
-    )
+  (MyBlades (Blade b1 c1 d1))
+  (MyBlades (Blade b2 c2 d2)) = MyBlades $ Blade @N2 @N1 @N1 @AsVec
     (A.zip (\_ (ApConst2 (AsVec v1)) (ApConst2 (AsVec v2)) ->
       ApConst2 (AsVec (V.append v1 v2))) FingerNil b1 b2
     )
     (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $ getMyBlades $
       appendMyBlades (MyBlades p1) (MyBlades p2)) FingerNil c1 c2
     )
+    (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $
+      appendCollections p1 p2) FingerNil d1 d2
+    )
+
+appendCollections :: forall na nb (m :: Meta N2 N1 N1).
+  Collection AsVec na m -> Collection AsVec nb m -> Collection AsVec (na + nb) m
+appendCollections
+  (Collection x1 a1 (Blade b1 c1 d1))
+  (Collection x2 a2 (Blade b2 c2 d2)) =
+  let sza1 = V.length a1
+      sza2 = V.length a2
+  in
+  Collection (Nat.plus x1 x2)
+    ( V.append
+      (fmap (fmap (Index.incrementLimitR x2)) a1)
+      (fmap (fmap (\i -> Index.incrementL x1 i)) a2)
+    ) $ Blade @N2 @N1 @N1 @AsVec
+    (A.zip (\_ (ApConst2 (AsVec v1)) (ApConst2 (AsVec v2)) ->
+      ApConst2 (AsVec (V.append v1 v2))) FingerNil b1 b2
+    )
     (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $ getMyBlades $
-      appendMyBlades (MyBlades p1) (MyBlades p2)) FingerNil d1 d2
+      appendMyBlades (MyBlades p1) (MyBlades p2)) FingerNil c1 c2
+    )
+    (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $
+      appendCollections p1 p2) FingerNil d1 d2
     )
 
 singletonArray :: a -> PM.Array a
 singletonArray x = runST
   (PM.newArray 1 x >>= PM.unsafeFreezeArray)
-  
+
+ascendingArray :: Arithmetic.Nat n -> PM.Array (Index.Index n)
+ascendingArray n = V.forget $ runST $ do
+  m <- V.new n
+  Index.ascendM (\ix@(Index.Index lt p) -> V.write lt m p ix) n
+  V.unsafeFreeze m
+

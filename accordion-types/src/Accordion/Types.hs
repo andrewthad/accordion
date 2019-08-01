@@ -18,6 +18,7 @@ module Accordion.Types
   , SingNat(..)
   , Fin(..)
   , Cardinality(..)
+  , Collection(..)
   , Blade(..)
   , Indexer(..)
   , Gte(..)
@@ -42,6 +43,7 @@ module Accordion.Types
     -- type families
   , Empty
   , Union
+  , UnionMeta
   , Singleton
     -- functions
   , map
@@ -50,7 +52,7 @@ module Accordion.Types
   , foldMap
   , foldMapF
   , leftUnion
-  , unionRecord
+  , unionBlade
   , zip
   , zipM_
   , singleton
@@ -213,6 +215,21 @@ type family IndexerF (c :: Cardinality) (n :: GHC.Nat) (m :: GHC.Nat) :: Type wh
   IndexerF 'One _ _ = ()
   IndexerF 'Many n m = (Arithmetic.Nat m, Vector n (Array (Index m)))
 
+data Collection ::
+    forall (fh :: Nat). -- Field height
+    forall (ph :: Nat). -- Prefix height
+    forall (mh :: Nat). -- Multi height
+    (GHC.Nat -> Vec fh Bool -> Type) -> -- Leaf Interpreter
+    GHC.Nat ->
+    Meta fh ph mh ->
+    Type
+  where
+  Collection ::
+       Arithmetic.Nat ch
+    -> Vector par (Array (Index ch))
+    -> Blade i ch meta
+    -> Collection i par meta
+
 -- As we descend, the interpreter tweaks itself. Sort of. This
 -- does not yet have any special treatment for 0-or-1 values,
 -- but it could.
@@ -220,11 +237,8 @@ data Blade ::
     forall (fh :: Nat). -- Field height
     forall (ph :: Nat). -- Prefix height
     forall (mh :: Nat). -- Multi height
-    forall (k :: Type).
-    (k -> Vec fh Bool -> Type) -> -- Leaf Interpreter
-    (Cardinality -> k -> k -> Type) -> -- Index Interpretter, parent then child
-    Cardinality -> -- Cardinality (sort of parent related)
-    k -> -- Size, that is, number of elements per column
+    (GHC.Nat -> Vec fh Bool -> Type) -> -- Leaf Interpreter
+    GHC.Nat -> -- Size, that is, number of elements per column
     Meta fh ph mh ->
     Type
   where
@@ -232,34 +246,30 @@ data Blade ::
     (fh :: Nat) -- Field height
     (ph :: Nat) -- Prefix height
     (mh :: Nat) -- Multi height
-    (k :: Type)
-    (i :: (k -> Vec fh Bool -> Type))
-    (ic :: (Cardinality -> k -> k -> Type))
-    (card :: Cardinality) -- Cardinality (sort of parent related)
-    (szParent :: k) -- Size, that is, number of elements per column
-    (szSelf :: k) -- Child size
+    (i :: (GHC.Nat -> Vec fh Bool -> Type))
+    (sz :: GHC.Nat) -- Size, that is, number of elements per column
     (f :: Map () fh 'Zero)
     (p :: Map (Meta fh ph mh) ph 'Zero)
     (m :: Map (Meta fh ph mh) mh 'Zero).
-       ic card szParent szSelf
+       -- ic card szParent szSelf
        -- This will look like:
        -- * UnliftedVec szParent (PrimArray (Index szSelf))
        -- * MaybeIndexArray szParent szSelf
        -- * Unit
-    -> Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) (i szSelf)) f 'VecNil
+       Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) (i sz)) f 'VecNil
     -> Tree @ph @'Zero @(Meta fh ph mh)
          ( ApConst1
            @(Meta fh ph mh) @(Vec ph Bool)
-           (Blade @fh @ph @mh i ic card szSelf)
+           (Blade @fh @ph @mh i sz)
          )
          p 'VecNil
     -> Tree @mh @'Zero @(Meta fh ph mh)
          ( ApConst1
            @(Meta fh ph mh) @(Vec mh Bool)
-           (Blade @fh @ph @mh i ic 'Many szSelf)
+           (Collection @fh @ph @mh i sz)
          )
          m 'VecNil
-    -> Blade @fh @ph @mh @k i ic card szParent ('Meta f p m)
+    -> Blade @fh @ph @mh i sz ('Meta f p m)
 
 -- A balanced tree that always has a base-two number of leaves. The
 -- type of the element at each position is determined by the interpretation
@@ -466,9 +476,9 @@ zip :: forall (h :: Nat) (n :: Nat) (z :: Type) (w :: Vec n Bool) (r :: Map z h 
      (k :: z -> Vec h Bool -> Type).
      (forall (v :: Vec h Bool) (y :: z). Finger h v -> i y v -> j y v -> k y v)
   -> Finger n w -- finger to the current nodes
-  -> Tree @h @n i r w -- left tree
-  -> Tree @h @n j r w -- right tree
-  -> Tree @h @n k r w -- result tree
+  -> Tree @h @n @z i r w -- left tree
+  -> Tree @h @n @z j r w -- right tree
+  -> Tree @h @n @z k r w -- result tree
 zip _ !_ TreeEmpty TreeEmpty = TreeEmpty
 zip f !v (TreeLeaf x) (TreeLeaf y) = TreeLeaf (f v x y)
 zip f !v (TreeLeft x) (TreeLeft y) = TreeLeft $! zip f (FingerCons SingFalse v) x y
@@ -515,16 +525,16 @@ zipM_ _ !_ (TreeBranch _ _) TreeEmpty = pure ()
 
 -- Left-biased union.
 leftUnion ::
-  forall (h :: Nat) (n :: Nat)
+  forall (h :: Nat) (n :: Nat) (k :: Type)
   (w :: Vec n Bool)
-  (r :: Map () h n) (s :: Map () h n)
-  (i :: Vec h Bool -> Type).
-     Tree @h @n @() (ApConst2 i) r w
-  -> Tree @h @n @() (ApConst2 i) s w
-  -> Tree @h @n @() (ApConst2 i) (Union r s) w
+  (r :: Map k h n) (s :: Map k h n)
+  (i :: k -> Vec h Bool -> Type).
+     Tree @h @n @k i r w
+  -> Tree @h @n @k i s w
+  -> Tree @h @n @k i (Union r s) w
 leftUnion TreeEmpty t = t
-leftUnion (TreeLeaf (ApConst2 x)) TreeEmpty = TreeLeaf (ApConst2 x)
-leftUnion (TreeLeaf (ApConst2 x)) (TreeLeaf _) = TreeLeaf (ApConst2 x)
+leftUnion (TreeLeaf x) TreeEmpty = TreeLeaf x
+leftUnion (TreeLeaf x) (TreeLeaf _) = TreeLeaf x
 leftUnion (TreeLeft x) (TreeLeft y) = TreeLeft (leftUnion x y)
 leftUnion (TreeBranch xl xr) (TreeRight yr) = TreeBranch xl (leftUnion xr yr)
 leftUnion (TreeBranch xl xr) (TreeLeft yl) = TreeBranch (leftUnion xl yl) xr
@@ -548,16 +558,16 @@ leftUnion (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 -- leftUnion and would be unnecessary if partially applied type
 -- families existed.
 unionPrefixMap ::
-  forall (fh :: Nat) (ph :: Nat) (n :: Nat)
+  forall (fh :: Nat) (ph :: Nat) (mh :: Nat) (n :: Nat) (sz :: GHC.Nat)
   (w :: Vec n Bool)
-  (r :: Map (Meta fh ph 'Zero) ph n) (s :: Map (Meta fh ph 'Zero) ph n)
-  (i :: Vec fh Bool -> Type).
-     Tree @ph @n (ApConst1 (Record i)) r w
-  -> Tree @ph @n (ApConst1 (Record i)) s w
-  -> Tree @ph @n (ApConst1 (Record i)) (UnionPrefix r s) w
+  (r :: Map (Meta fh ph mh) ph n) (s :: Map (Meta fh ph mh) ph n)
+  (i :: GHC.Nat -> Vec fh Bool -> Type).
+     Tree @ph @n (ApConst1 (Blade i sz)) r w
+  -> Tree @ph @n (ApConst1 (Blade i sz)) s w
+  -> Tree @ph @n (ApConst1 (Blade i sz)) (UnionPrefix r s) w
 unionPrefixMap TreeEmpty t = t
 unionPrefixMap (TreeLeaf (ApConst1 x)) TreeEmpty = TreeLeaf (ApConst1 x)
-unionPrefixMap (TreeLeaf (ApConst1 x)) (TreeLeaf (ApConst1 y)) = TreeLeaf (ApConst1 (unionRecord x y))
+unionPrefixMap (TreeLeaf (ApConst1 x)) (TreeLeaf (ApConst1 y)) = TreeLeaf (ApConst1 (unionBlade x y))
 unionPrefixMap (TreeLeft x) (TreeLeft y) = TreeLeft (unionPrefixMap x y)
 unionPrefixMap (TreeBranch xl xr) (TreeRight yr) = TreeBranch xl (unionPrefixMap xr yr)
 unionPrefixMap (TreeBranch xl xr) (TreeLeft yl) = TreeBranch (unionPrefixMap xl yl) xr
@@ -577,15 +587,25 @@ unionPrefixMap (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 
-unionRecord ::
-  forall (h :: Nat) (n :: Nat)
-  (ml :: Meta h n 'Zero) (mr :: Meta h n 'Zero)
-  (i :: Vec h Bool -> Type).
-     Record i ml
-  -> Record i mr
-  -> Record i (UnionMeta ml mr)
-unionRecord (Record fl pl) (Record fr pr) =
-  Record (leftUnion fl fr) (unionPrefixMap pl pr)
+-- unionRecord ::
+--   forall (h :: Nat) (n :: Nat)
+--   (ml :: Meta h n 'Zero) (mr :: Meta h n 'Zero)
+--   (i :: Vec h Bool -> Type).
+--      Record i ml
+--   -> Record i mr
+--   -> Record i (UnionMeta ml mr)
+-- unionRecord (Record fl pl) (Record fr pr) =
+--   Record (leftUnion fl fr) (unionPrefixMap pl pr)
+
+unionBlade ::
+  forall (h :: Nat) (n :: Nat) (p :: Nat)
+  (ml :: Meta h n p) (mr :: Meta h n p) (sz :: GHC.Nat)
+  (i :: GHC.Nat -> Vec h Bool -> Type).
+     Blade i sz ml
+  -> Blade i sz mr
+  -> Blade i sz (UnionMeta ml mr)
+unionBlade (Blade fl pl ml) (Blade fr pr mr) =
+  Blade (leftUnion fl fr) (unionPrefixMap pl pr) (leftUnion ml mr)
 
 -- Right fold over the values in a tree using an omnitree for
 -- per-slot behavior.
@@ -658,7 +678,7 @@ type family FieldList (xs :: [Vec h Bool]) :: Map () h 'Zero where
 
 type family UnionMeta (x :: Meta fh ph mh) (y :: Meta fh ph mh) :: Meta fh ph mh where
   UnionMeta ('Meta fl pl ml) ('Meta fr pr mr) =
-    ('Meta (Union fl fr) (UnionPrefix pl pr) (UnionPrefix ml mr))
+    ('Meta (Union fl fr) (UnionPrefix pl pr) (Union ml mr))
 
 -- UnionPrefix is essentially a duplicate of Union. Without
 -- being able to partially apply type families, we have no
@@ -683,8 +703,8 @@ type family UnionPrefix (x :: Map (Meta fh ph mh) h n) (y :: Map (Meta fh ph mh)
 
 -- TODO: It may be necessary to rethink choice of which
 -- unit data constructor to use.
-type family Union (x :: Map () h n) (y :: Map () h n) :: Map () h n where
-  Union ('MapLeaf _) ('MapLeaf _) = 'MapLeaf '()
+type family Union (x :: Map k h n) (y :: Map k h n) :: Map k h n where
+  Union ('MapLeaf x) ('MapLeaf _) = 'MapLeaf x
   Union ('MapLeaf x) 'MapEmpty = 'MapLeaf x
   Union 'MapEmpty s = s
   Union ('MapLeft x) 'MapEmpty = 'MapLeft x
