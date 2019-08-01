@@ -38,12 +38,12 @@ age' :: Int -> Tree
   (ApConst2 (Interpreted Identity))
   (FieldList '[ Index 'Age] )
   'VecNil
-age' i = singleton (index SingAge) (index SingAge)
+age' i = singleton (index SingAge)
   (TreeLeaf (ApConst2 (Interpreted (Identity i))))
 
 alive :: Bool -> MyBlade (MetaFields (FieldList '[Alive]))
 alive i = MyBlade $ Blade
-  ( singleton (index SingAlive) (index SingAlive)
+  ( singleton (index SingAlive)
     (TreeLeaf (ApConst2 (AsVec (V.singleton i))))
   )
   A.TreeEmpty
@@ -51,7 +51,7 @@ alive i = MyBlade $ Blade
 
 age :: Int -> MyBlade (MetaFields (FieldList '[Age]))
 age i = MyBlade $ Blade
-  ( singleton (index SingAge) (index SingAge)
+  ( singleton (index SingAge)
     (TreeLeaf (ApConst2 (AsVec (V.singleton i))))
   )
   A.TreeEmpty
@@ -61,7 +61,7 @@ dogs ::
      Blades m
   -> MyBlade ('Meta 'MapEmpty 'MapEmpty (Singleton Dogs ('MapLeaf m)))
 dogs (Blades n x) = MyBlade $ Blade TreeEmpty TreeEmpty
-  (A.singleton (indexMultiprefix SingDogs) (indexMultiprefix SingDogs)
+  (A.singleton (indexMultiprefix SingDogs)
     (TreeLeaf (ApConst1 (Collection n (V.singleton (ascendingArray n)) x)))
   )
 
@@ -69,7 +69,6 @@ dog :: Record f m
   -> Record f ('Meta 'MapEmpty (Singleton (IndexPrefix 'Dog) ('MapLeaf m)) 'MapEmpty)
 dog r = Record TreeEmpty
   (singleton
-    (indexPrefix SingDog)
     (indexPrefix SingDog)
     (TreeLeaf (ApConst1 r))
   )

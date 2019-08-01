@@ -375,18 +375,15 @@ empty = TreeEmpty
 -- the Singleton type family. The Zero in the resulting Tree is dictated by
 -- the result kind of the Singleton type family. 
 singleton ::
-     forall (h :: Nat) (n :: Nat) (k :: Type) (v :: Vec h Bool)
+     forall (h :: Nat) (n :: Nat) (k :: Type)
             (w :: Vec n Bool) (s :: Map k h n) (i :: k -> Vec h Bool -> Type).
      Finger n w -- Finger to node under consideration
-  -> Finger h v
-     -- Finger to singleton leaf node, does not change while recursing.
-     -- Why is this argument even necessary. I am not sure that it is.
   -> Tree @h @n i s w
   -> Tree @h @'Zero i (Singleton w s) 'VecNil
-singleton FingerNil _ s = s
-singleton (FingerCons b bs) v s = case b of
-  SingFalse -> singleton bs v (TreeLeft s)
-  SingTrue -> singleton bs v (TreeRight s)
+singleton FingerNil s = s
+singleton (FingerCons b bs) s = case b of
+  SingFalse -> singleton bs (TreeLeft s)
+  SingTrue -> singleton bs (TreeRight s)
 
 get :: Elem @h @n v w s -> Tree @h @n @() (ApConst2 i) s w -> i v
 get ElemLeaf (TreeLeaf (ApConst2 x)) = x
