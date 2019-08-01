@@ -41,16 +41,16 @@ age' :: Int -> Tree
 age' i = singleton (index SingAge)
   (TreeLeaf (ApConst2 (Interpreted (Identity i))))
 
-alive :: Bool -> MyBlade (MetaFields (FieldList '[Alive]))
-alive i = MyBlade $ Blade
+alive :: Bool -> MyRecord (MetaFields (FieldList '[Alive]))
+alive i = MyRecord $ Record
   ( singleton (index SingAlive)
     (TreeLeaf (ApConst2 (AsVec (V.singleton i))))
   )
   A.TreeEmpty
   A.TreeEmpty
 
-age :: Int -> MyBlade (MetaFields (FieldList '[Age]))
-age i = MyBlade $ Blade
+age :: Int -> MyRecord (MetaFields (FieldList '[Age]))
+age i = MyRecord $ Record
   ( singleton (index SingAge)
     (TreeLeaf (ApConst2 (AsVec (V.singleton i))))
   )
@@ -58,15 +58,15 @@ age i = MyBlade $ Blade
   A.TreeEmpty
 
 dogs ::
-     Blades m
-  -> MyBlade ('Meta 'MapEmpty 'MapEmpty (Singleton Dogs ('MapLeaf m)))
-dogs (Blades n x) = MyBlade $ Blade TreeEmpty TreeEmpty
+     Records m
+  -> MyRecord ('Meta 'MapEmpty 'MapEmpty (Singleton Dogs ('MapLeaf m)))
+dogs (Records n x) = MyRecord $ Record TreeEmpty TreeEmpty
   (A.singleton (indexMultiprefix SingDogs)
     (TreeLeaf (ApConst1 (Collection n (V.singleton (ascendingArray n)) x)))
   )
 
-union :: MyBlade r -> MyBlade s -> MyBlade (UnionMeta r s)
-union (MyBlade x) (MyBlade y) = MyBlade (A.unionBlade x y)
+union :: MyRecord r -> MyRecord s -> MyRecord (UnionMeta r s)
+union (MyRecord x) (MyRecord y) = MyRecord (A.unionRecord x y)
 
 data Field
   = Age
@@ -206,41 +206,41 @@ type family AsVecFam (n :: GHC.Nat) (v :: Vec N2 Bool) :: Type where
 newtype AsVec :: GHC.Nat -> Vec N2 Bool -> Type where
   AsVec :: AsVecFam n v -> AsVec n v
 
-newtype MyBlade :: Meta N2 N1 N1 -> Type where
-  MyBlade :: Blade @N2 @N1 @N1 AsVec 1 m -> MyBlade m
+newtype MyRecord :: Meta N2 N1 N1 -> Type where
+  MyRecord :: Record @N2 @N1 @N1 AsVec 1 m -> MyRecord m
 
-data Blades :: Meta N2 N1 N1 -> Type where
-  Blades ::
+data Records :: Meta N2 N1 N1 -> Type where
+  Records ::
        Arithmetic.Nat n
-    -> Blade @N2 @N1 @N1 AsVec n m
-    -> Blades m
+    -> Record @N2 @N1 @N1 AsVec n m
+    -> Records m
 
-instance Semigroup (Blades m) where
-  Blades x a <> Blades y b = Blades (Nat.plus x y)
-    (getMyBlades (appendMyBlades (MyBlades a) (MyBlades b)))
+instance Semigroup (Records m) where
+  Records x a <> Records y b = Records (Nat.plus x y)
+    (getMyRecords (appendMyRecords (MyRecords a) (MyRecords b)))
 
-newtype MyBlades :: GHC.Nat -> Meta N2 N1 N1 -> Type where
-  MyBlades ::
-    { getMyBlades :: Blade @N2 @N1 @N1 AsVec n m
-    } -> MyBlades n m
+newtype MyRecords :: GHC.Nat -> Meta N2 N1 N1 -> Type where
+  MyRecords ::
+    { getMyRecords :: Record @N2 @N1 @N1 AsVec n m
+    } -> MyRecords n m
 
-concatBlades :: NonEmpty (MyBlade m) -> Blades m
-concatBlades = sconcat . fmap singletonBlades
+concatRecords :: NonEmpty (MyRecord m) -> Records m
+concatRecords = sconcat . fmap singletonRecords
 
-singletonBlades :: MyBlade m -> Blades m
-singletonBlades (MyBlade m) = case m of
-  Blade x y z -> Blades Nat.one (Blade x y z)
+singletonRecords :: MyRecord m -> Records m
+singletonRecords (MyRecord m) = case m of
+  Record x y z -> Records Nat.one (Record x y z)
 
-appendMyBlades :: forall na nb m.
-  MyBlades na m -> MyBlades nb m -> MyBlades (na + nb) m
-appendMyBlades
-  (MyBlades (Blade b1 c1 d1))
-  (MyBlades (Blade b2 c2 d2)) = MyBlades $ Blade @N2 @N1 @N1 @AsVec
+appendMyRecords :: forall na nb m.
+  MyRecords na m -> MyRecords nb m -> MyRecords (na + nb) m
+appendMyRecords
+  (MyRecords (Record b1 c1 d1))
+  (MyRecords (Record b2 c2 d2)) = MyRecords $ Record @N2 @N1 @N1 @AsVec
     (A.zip (\_ (ApConst2 (AsVec v1)) (ApConst2 (AsVec v2)) ->
       ApConst2 (AsVec (V.append v1 v2))) FingerNil b1 b2
     )
-    (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $ getMyBlades $
-      appendMyBlades (MyBlades p1) (MyBlades p2)) FingerNil c1 c2
+    (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $ getMyRecords $
+      appendMyRecords (MyRecords p1) (MyRecords p2)) FingerNil c1 c2
     )
     (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $
       appendCollections p1 p2) FingerNil d1 d2
@@ -249,8 +249,8 @@ appendMyBlades
 appendCollections :: forall na nb (m :: Meta N2 N1 N1).
   Collection AsVec na m -> Collection AsVec nb m -> Collection AsVec (na + nb) m
 appendCollections
-  (Collection x1 a1 (Blade b1 c1 d1))
-  (Collection x2 a2 (Blade b2 c2 d2)) =
+  (Collection x1 a1 (Record b1 c1 d1))
+  (Collection x2 a2 (Record b2 c2 d2)) =
   let sza1 = V.length a1
       sza2 = V.length a2
   in
@@ -258,12 +258,12 @@ appendCollections
     ( V.append
       (fmap (fmap (Index.incrementLimitR x2)) a1)
       (fmap (fmap (\i -> Index.incrementL x1 i)) a2)
-    ) $ Blade @N2 @N1 @N1 @AsVec
+    ) $ Record @N2 @N1 @N1 @AsVec
     (A.zip (\_ (ApConst2 (AsVec v1)) (ApConst2 (AsVec v2)) ->
       ApConst2 (AsVec (V.append v1 v2))) FingerNil b1 b2
     )
-    (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $ getMyBlades $
-      appendMyBlades (MyBlades p1) (MyBlades p2)) FingerNil c1 c2
+    (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $ getMyRecords $
+      appendMyRecords (MyRecords p1) (MyRecords p2)) FingerNil c1 c2
     )
     (A.zip (\_ (ApConst1 p1) (ApConst1 p2) -> ApConst1 $
       appendCollections p1 p2) FingerNil d1 d2

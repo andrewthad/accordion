@@ -18,7 +18,7 @@ module Accordion.Types
   , SingNat(..)
   , Fin(..)
   , Collection(..)
-  , Blade(..)
+  , Record(..)
   , Gte(..)
   , ApConst1(..)
   , ApConst2(..)
@@ -49,7 +49,7 @@ module Accordion.Types
   , foldMap
   , foldMapF
   , leftUnion
-  , unionBlade
+  , unionRecord
   , zip
   , zipM_
   , singleton
@@ -199,13 +199,13 @@ data Collection ::
   Collection ::
        Arithmetic.Nat ch
     -> Vector par (Array (Index ch))
-    -> Blade i ch meta
+    -> Record i ch meta
     -> Collection i par meta
 
 -- As we descend, the interpreter tweaks itself. Sort of. This
 -- does not yet have any special treatment for 0-or-1 values,
 -- but it could.
-data Blade ::
+data Record ::
     forall (fh :: Nat) -- Field height
            (ph :: Nat) -- Prefix height
            (mh :: Nat). -- Multi height
@@ -214,7 +214,7 @@ data Blade ::
     Meta fh ph mh ->
     Type
   where
-  Blade :: forall
+  Record :: forall
     (fh :: Nat) -- Field height
     (ph :: Nat) -- Prefix height
     (mh :: Nat) -- Multi height
@@ -227,7 +227,7 @@ data Blade ::
     -> Tree @ph @'Zero @(Meta fh ph mh)
          ( ApConst1
            @(Meta fh ph mh) @(Vec ph Bool)
-           (Blade @fh @ph @mh i sz)
+           (Record @fh @ph @mh i sz)
          )
          p 'VecNil
     -> Tree @mh @'Zero @(Meta fh ph mh)
@@ -236,7 +236,7 @@ data Blade ::
            (Collection @fh @ph @mh i sz)
          )
          m 'VecNil
-    -> Blade @fh @ph @mh i sz ('Meta f p m)
+    -> Record @fh @ph @mh i sz ('Meta f p m)
 
 -- A balanced tree that always has a base-two number of leaves. The
 -- type of the element at each position is determined by the interpretation
@@ -526,12 +526,12 @@ unionPrefixMap ::
   (w :: Vec n Bool)
   (r :: Map (Meta fh ph mh) ph n) (s :: Map (Meta fh ph mh) ph n)
   (i :: GHC.Nat -> Vec fh Bool -> Type).
-     Tree @ph @n (ApConst1 (Blade i sz)) r w
-  -> Tree @ph @n (ApConst1 (Blade i sz)) s w
-  -> Tree @ph @n (ApConst1 (Blade i sz)) (UnionPrefix r s) w
+     Tree @ph @n (ApConst1 (Record i sz)) r w
+  -> Tree @ph @n (ApConst1 (Record i sz)) s w
+  -> Tree @ph @n (ApConst1 (Record i sz)) (UnionPrefix r s) w
 unionPrefixMap TreeEmpty t = t
 unionPrefixMap (TreeLeaf (ApConst1 x)) TreeEmpty = TreeLeaf (ApConst1 x)
-unionPrefixMap (TreeLeaf (ApConst1 x)) (TreeLeaf (ApConst1 y)) = TreeLeaf (ApConst1 (unionBlade x y))
+unionPrefixMap (TreeLeaf (ApConst1 x)) (TreeLeaf (ApConst1 y)) = TreeLeaf (ApConst1 (unionRecord x y))
 unionPrefixMap (TreeLeft x) (TreeLeft y) = TreeLeft (unionPrefixMap x y)
 unionPrefixMap (TreeBranch xl xr) (TreeRight yr) = TreeBranch xl (unionPrefixMap xr yr)
 unionPrefixMap (TreeBranch xl xr) (TreeLeft yl) = TreeBranch (unionPrefixMap xl yl) xr
@@ -551,15 +551,15 @@ unionPrefixMap (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 unionPrefixMap (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 
-unionBlade ::
+unionRecord ::
   forall (h :: Nat) (n :: Nat) (p :: Nat)
   (ml :: Meta h n p) (mr :: Meta h n p) (sz :: GHC.Nat)
   (i :: GHC.Nat -> Vec h Bool -> Type).
-     Blade i sz ml
-  -> Blade i sz mr
-  -> Blade i sz (UnionMeta ml mr)
-unionBlade (Blade fl pl ml) (Blade fr pr mr) =
-  Blade (leftUnion fl fr) (unionPrefixMap pl pr) (leftUnion ml mr)
+     Record i sz ml
+  -> Record i sz mr
+  -> Record i sz (UnionMeta ml mr)
+unionRecord (Record fl pl ml) (Record fr pr mr) =
+  Record (leftUnion fl fr) (unionPrefixMap pl pr) (leftUnion ml mr)
 
 -- Right fold over the values in a tree using an omnitree for
 -- per-slot behavior.
