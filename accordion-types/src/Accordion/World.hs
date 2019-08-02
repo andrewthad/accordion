@@ -3,23 +3,41 @@
 {-# language DataKinds #-}
 {-# language RankNTypes #-}
 {-# language TypeFamilies #-}
+{-# language TypeOperators #-}
 
 module Accordion.World
   ( World(..)
   , SingWorld(..)
+  , SingMultiplicity(..)
   , Primitive(..)
+  , Multiplicity(..)
   , SingPrimitive(..)
+  , GroundWorld
   , GroundPrimitive
   , VectorizePrimitive
+  , VectorizeWorld
+  , appendVectors
+  , singletonVector
+    -- Hacks
+  , FlipVector(..)
   ) where
 
 import Data.Kind (Type)
-import Data.Primitive (PrimArray)
+import Data.Primitive (PrimArray,Array)
 import Data.Word (Word8)
+import Data.Functor.Identity (Identity(..))
+import Data.Array.Indexed (Vector)
+import GHC.TypeNats (type (+))
 
-data World a
-  = Primitive Primitive
-  | Other a
+import qualified GHC.TypeNats as GHC
+import qualified Data.Array.Indexed as V
+
+data World = World Multiplicity Primitive
+
+data Multiplicity
+  = One
+  | Optional
+  | Many
 
 data Primitive
   = Int
@@ -31,19 +49,52 @@ data SingPrimitive :: Primitive -> Type where
   SingBool :: SingPrimitive 'Bool
   SingChar :: SingPrimitive 'Char
 
-data SingWorld :: forall (k :: Type). (k -> Type) -> World k -> Type where
-  SingPrimitive :: SingPrimitive p -> SingWorld s ('Primitive p)
-  SingOther :: s e -> SingWorld s ('Other e)
+data SingMultiplicity :: Multiplicity -> Type where
+  SingOne :: SingMultiplicity 'One
+  SingOptional :: SingMultiplicity 'Optional
+  SingMany :: SingMultiplicity 'Many
+
+data SingWorld :: World -> Type where
+  SingWorld :: SingMultiplicity m -> SingPrimitive p -> SingWorld ('World m p)
+
+type family GroundWorld (w :: World) :: Type where
+  GroundWorld ('World m p) = GroundMultiplicity m (GroundPrimitive p)
+
+type family GroundMultiplicity (m :: Multiplicity) :: Type -> Type where
+  GroundMultiplicity 'One = Identity
+  GroundMultiplicity 'Many = PrimArray
+  GroundMultiplicity 'Optional = Maybe
 
 type family GroundPrimitive (p :: Primitive) :: Type where
   GroundPrimitive 'Int = Int
   GroundPrimitive 'Bool = Bool
   GroundPrimitive 'Char = Char
 
+type family VectorizeWorld (w :: World) :: GHC.Nat -> Type where
+  VectorizeWorld ('World 'One p) = FlipVector (GroundPrimitive p)
+  VectorizeWorld ('World 'Optional p) = FlipVector (GroundPrimitive p)
+  VectorizeWorld ('World 'Many p) = FlipVector (Array (GroundPrimitive p))
+
 type family VectorizePrimitive (p :: Primitive) :: Type where
   VectorizePrimitive 'Int = PrimArray Int
   VectorizePrimitive 'Bool = PrimArray Word8
   VectorizePrimitive 'Char = PrimArray Char
+
+newtype FlipVector a n = FlipVector (Vector n a)
+
+appendVectors ::
+     SingWorld w
+  -> VectorizeWorld w n
+  -> VectorizeWorld w m
+  -> VectorizeWorld w (n + m)
+appendVectors (SingWorld SingOne SingInt) (FlipVector x) (FlipVector y) =
+  FlipVector (V.append x y)
+
+singletonVector ::
+     SingWorld w
+  -> GroundWorld w
+  -> VectorizeWorld w 1
+singletonVector (SingWorld SingOne SingInt) (Identity x) = FlipVector (V.singleton x)
 
 -- type family VectorElem (w :: World (k :: Type)) :: Type where
 --   VectorElem 'Int = Int

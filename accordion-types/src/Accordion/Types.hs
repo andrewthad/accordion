@@ -45,6 +45,7 @@ module Accordion.Types
     -- functions
   , map
   , traverse
+  , itraverse_
   , traverseF
   , foldMap
   , foldMapF
@@ -57,6 +58,7 @@ module Accordion.Types
   , omnibuild
   , omnifoldr
   , omnisubset
+  , iomnitraverse_
     -- getter and setter
   , get
   ) where
@@ -64,6 +66,7 @@ module Accordion.Types
 import Prelude hiding (map,zip,traverse,foldMap)
 
 import Control.Applicative (liftA2)
+import Data.Functor (($>))
 import Data.Kind (Type)
 import Data.Void (Void,absurd)
 import Data.Primitive (Array)
@@ -273,14 +276,18 @@ data Tree ::
 -- This is like Tree except that every element is present. It is not
 -- parameterized by a Set since everything is present, but each leaf
 -- does keep a type-level finger to itself.
-data Omnitree (h :: Nat) (n :: Nat) (i :: Vec h Bool -> Type) (v :: Vec n Bool) where
+data Omnitree :: forall (h :: Nat) (n :: Nat).
+    (Vec h Bool -> Type) ->
+    Vec n Bool ->
+    Type
+  where
   OmnitreeLeaf ::
        i v
-    -> Omnitree h h i v
+    -> Omnitree @h @h i v
   OmnitreeBranch ::
-       Omnitree h ('Succ n) i ('VecCons 'False v)
-    -> Omnitree h ('Succ n) i ('VecCons 'True v)
-    -> Omnitree h n i v
+       Omnitree @h @('Succ n) i ('VecCons 'False v)
+    -> Omnitree @h @('Succ n) i ('VecCons 'True v)
+    -> Omnitree @h @n i v
 
 -- The implementation is efficient. This function typically gets
 -- used to build CAFs that last for a program's lifetime, so the
@@ -288,9 +295,9 @@ data Omnitree (h :: Nat) (n :: Nat) (i :: Vec h Bool -> Type) (v :: Vec n Bool) 
 omnibuild :: forall h i.
      SingNat h
   -> (forall v. Finger h v -> i v)
-  -> Omnitree h 'Zero i 'VecNil
+  -> Omnitree @h @'Zero i 'VecNil
 omnibuild h0 f = go (gteZero h0) FingerNil where
-  go :: forall m w. Gte h m -> Finger m w -> Omnitree h m i w
+  go :: forall m w. Gte h m -> Finger m w -> Omnitree @h @m i w
   go GteEq v = OmnitreeLeaf (f v)
   go (GteGt gt) v = OmnitreeBranch (go gt (FingerCons SingFalse v)) (go gt (FingerCons SingTrue v))
 
@@ -359,6 +366,14 @@ get (ElemRight e) (TreeRight x) = get e x
 get (ElemBranchLeft e) (TreeBranch x _) = get e x
 get (ElemBranchRight e) (TreeBranch _ x) = get e x
 
+-- omniget :: Finger h v -> Omnitree @h @n i v -> i v
+-- omniget FingerNil (OmnitreeLeaf x) = x
+-- omniget (FingerCons SingTrue e) (OmnitreeBranch x _) = omniget e x
+
+-- omniget (ElemRight e) (TreeRight x) = get e x
+-- omniget (ElemBranchLeft e) (TreeBranch x _) = get e x
+-- omniget (ElemBranchRight e) (TreeBranch _ x) = get e x
+
 map ::
      forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: Map () h n)
      (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type).
@@ -371,6 +386,23 @@ map _ !_ TreeEmpty = TreeEmpty
 map f !v (TreeLeft a) = TreeLeft (map f (FingerCons SingFalse v) a)
 map f !v (TreeRight b) = TreeRight (map f (FingerCons SingTrue v) b)
 map f !v (TreeBranch a b) = TreeBranch (map f (FingerCons SingFalse v) a) (map f (FingerCons SingTrue v) b)
+
+itraverse_ ::
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (m :: Type -> Type).
+     Monad m
+  => (forall (v :: Vec h Bool) (y :: k). Int -> Finger h v -> i y v -> m ())
+  -> Int -- starting index
+  -> Finger n w -- finger to the current nodes
+  -> Tree @h @n @k i s w -- argument tree
+  -> m Int
+itraverse_ _ !ix !_ TreeEmpty = pure ix
+itraverse_ f !ix !v (TreeLeaf x) = f ix v x $> (ix + 1)
+itraverse_ f !ix !v (TreeLeft a) = itraverse_ f ix (FingerCons SingFalse v) a
+itraverse_ f !ix !v (TreeRight b) = itraverse_ f ix (FingerCons SingTrue v) b
+itraverse_ f !ix !v (TreeBranch a b) = do
+  ix' <- itraverse_ f ix (FingerCons SingFalse v) a
+  itraverse_ f ix' (FingerCons SingTrue v) b
 
 traverse ::
      forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: Map () h n)
@@ -403,16 +435,23 @@ traverseF f (TreeBranch a b) = liftA2 TreeBranch
   (traverseF f a)
   (traverseF f b)
 
+-- foldMapRecord :: 
+--      (forall (v :: Vec h Bool). Finger h v -> i v -> m)
+--   -> Finger n w -- finger to the current nodes
+--   -> Tree @h @n (ApConst2 i) s w -- argument tree
+--   -> m
+-- foldMapRecord f v
+
 foldMap ::
-     forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: Map () h n)
-     (i :: Vec h Bool -> Type) (m :: Type).
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (m :: Type).
      Monoid m
-  => (forall (v :: Vec h Bool). Finger h v -> i v -> m)
+  => (forall (v :: Vec h Bool) (y :: k). Finger h v -> i y v -> m)
   -> Finger n w -- finger to the current nodes
-  -> Tree @h @n (ApConst2 i) s w -- argument tree
+  -> Tree @h @n i s w -- argument tree
   -> m
 foldMap _ !_ TreeEmpty = mempty
-foldMap f !v (TreeLeaf (ApConst2 x)) = f v x
+foldMap f !v (TreeLeaf x) = f v x
 foldMap f !v (TreeLeft a) = foldMap f (FingerCons SingFalse v) a
 foldMap f !v (TreeRight b) = foldMap f (FingerCons SingTrue v) b
 foldMap f !v (TreeBranch a b) =
@@ -561,10 +600,32 @@ unionRecord ::
 unionRecord (Record fl pl ml) (Record fr pr mr) =
   Record (leftUnion fl fr) (unionPrefixMap pl pr) (leftUnion ml mr)
 
+iomnitraverse_ ::
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
+     Monad m
+  => Omnitree @h @n j w
+  -> (forall (v :: Vec h Bool) (y :: k). Int -> j v -> i y v -> m ())
+  -> Int -- starting index
+  -> Tree @h @n @k i s w -- argument tree
+  -> m Int
+iomnitraverse_ !_ _ !ix TreeEmpty = pure ix
+iomnitraverse_ (OmnitreeLeaf r) f !ix (TreeLeaf x) = f ix r x $> (ix + 1)
+iomnitraverse_ (OmnitreeLeaf _) _ !_ (TreeLeft t) = absurd (impossibleGte (treeToGte t))
+iomnitraverse_ (OmnitreeLeaf _) _ !_ (TreeRight t) = absurd (impossibleGte (treeToGte t))
+iomnitraverse_ (OmnitreeLeaf _) _ !_ (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
+iomnitraverse_ (OmnitreeBranch x _) _ !_ (TreeLeaf _) =
+  absurd (impossibleGte (omnitreeToGte x))
+iomnitraverse_ (OmnitreeBranch x _) f !ix (TreeLeft a) = iomnitraverse_ x f ix a
+iomnitraverse_ (OmnitreeBranch _ y) f !ix (TreeRight b) = iomnitraverse_ y f ix b
+iomnitraverse_ (OmnitreeBranch x y) f !ix (TreeBranch a b) = do
+  ix' <- iomnitraverse_ x f ix a
+  iomnitraverse_ y f ix' b
+
 -- Right fold over the values in a tree using an omnitree for
 -- per-slot behavior.
 omnifoldr ::
-     Omnitree h n i v
+     Omnitree @h @n i v
   -> (forall (w :: Vec h Bool). i w -> j w -> b -> b)
   -> b
   -> Tree @h @n (ApConst2 j) s v
@@ -581,7 +642,7 @@ omnifoldr (OmnitreeBranch x _) _ _ (TreeLeaf _) = absurd (impossibleGte (omnitre
 omnifoldr (OmnitreeBranch _ _) _ b TreeEmpty = b
 
 omnisubset ::
-     Omnitree h n i v
+     Omnitree @h @n i v
   -> Tree @h @n (ApConst2 p) s v
   -> Tree @h @n (ApConst2 i) s v
 omnisubset (OmnitreeLeaf i) (TreeLeaf _) = TreeLeaf (ApConst2 i)
@@ -609,7 +670,7 @@ treeToGte (TreeBranch t _) = GteGt (treeToGte t)
 treeToGte (TreeLeft t) = GteGt (treeToGte t)
 treeToGte (TreeRight t) = GteGt (treeToGte t)
 
-omnitreeToGte :: Omnitree h n i v -> Gte h n
+omnitreeToGte :: Omnitree @h @n i v -> Gte h n
 omnitreeToGte (OmnitreeBranch t _) = GteGt (omnitreeToGte t)
 omnitreeToGte (OmnitreeLeaf _) = GteEq
 

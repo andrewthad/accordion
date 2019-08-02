@@ -1,0 +1,69 @@
+{-# language DataKinds #-}
+{-# language KindSignatures #-}
+{-# language TypeFamilies #-}
+{-# language TypeOperators #-}
+{-# language GADTSyntax #-}
+
+signature Accordion.Base.Signature where
+
+import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger,Map,Tree)
+import Accordion.World (World(..),Primitive,SingWorld,GroundPrimitive,GroundWorld)
+import Control.Monad.ST (ST)
+import Data.Kind (Type)
+import Data.Type.Equality ((:~:))
+import Data.Primitive (MutablePrimArray,PrimArray)
+import Data.Word (Word8)
+
+data FieldHeight :: Nat
+data PrefixHeight :: Nat
+data ManyHeight :: Nat
+data Universe :: Type
+data SingUniverse :: Universe -> Type
+
+type family Interpret (v :: Vec FieldHeight Bool) :: Universe where ..
+
+-- Convert a universe to the user-facing type
+type family Ground (u :: Universe) :: Type where ..
+
+-- Convert a universe to a type that is used as an internal
+-- representation of the user-facing type.
+type family Represent (u :: Universe) :: World where ..
+
+represent :: SingUniverse u -> SingWorld (Represent u)
+
+-- This function is weird. There must be a better way.
+-- No, there is not.
+showIndexField :: Finger FieldHeight v -> String
+
+singFieldHeight :: SingNat FieldHeight
+interpret :: Finger FieldHeight v -> SingUniverse (Interpret v)
+showsPrecUniverse :: SingUniverse u -> Int -> Ground u -> ShowS
+
+
+toInternal ::
+     SingUniverse u
+  -> Ground u
+  -> GroundWorld (Represent u)
+
+fromInternal ::
+     SingUniverse u
+  -> GroundWorld (Represent u)
+  -> Ground u
+
+-- TODO: Move this function into a different module
+-- vectorizedEquality ::
+--      SingUniverse u
+--   -> Ground u
+--   -> Vectorize u
+--   -> MutablePrimArray s Word8
+--   -> Int -- offset
+--   -> Int -- length
+--   -> ST s ()
+
+-- vectorizedFilter ::
+--      SingUniverse u
+--   -> Vectorize u
+--   -> PrimArray Word8
+--   -> Int -- offset
+--   -> Int -- length
+--   -> Vectorize u
