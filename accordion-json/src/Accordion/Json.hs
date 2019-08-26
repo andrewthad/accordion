@@ -12,7 +12,8 @@
 {-# language OverloadedStrings #-}
 
 module Accordion.Json
-  ( encode
+  ( encodeRecords
+  , encodeOptionals
   ) where
 
 import Accordion.Base (Vectorized(..),Records(..))
@@ -27,8 +28,13 @@ import Data.Bytes.Types (Bytes(..))
 import Control.Monad (when)
 import Data.ByteString.Short.Internal (ShortByteString(SBS))
 import Data.Kind (Type)
-import Accordion.Json.Types (Encode(..))
+import Data.Array.Int (MutableIntVector)
+import Data.Array.Bool (BoolVector,MutableBoolVector)
+import Accordion.Json.Types (Encode(..),EncodeOptional(..))
+import Accordion.Types (Apply2(..),WithBools(..))
 
+import qualified Data.Array.Int as Int
+import qualified Data.Array.Bool as Bool
 import qualified Accordion.Base as Base
 import qualified Accordion.Base.Signature as B
 import qualified Accordion.Json.Signature as J
@@ -43,31 +49,44 @@ import qualified Data.ByteArray.Builder.Small as BBS
 import qualified Data.Text.Short as TS
 import qualified GHC.TypeNats as GHC
 
-encode ::
+encodeRecords ::
      Int -- ^ Size hint
   -> Base.Records m
   -> PM.Array ByteArray
-encode hint (Base.Records n r) = V.forget (encodeInternal hint n r)
+encodeRecords hint (Base.Records n r) =
+  V.forget (encodeMandatoryInternal hint n r)
 
-encodeInternal ::
+encodeOptionals ::
      Int -- ^ Size hint
-  -> Arithmetic.Nat n
-  -> A.Record Vectorized n m
-  -> Vector n ByteArray
-encodeInternal hint n (A.Record fields _ _) = runST $ do
+  -> Base.Optionals m
+  -> PM.Array ByteArray
+encodeOptionals hint (Base.Optionals n r) =
+  V.forget (encodeOptionalInternal hint n r)
+
+initializeBuilders ::
+     Arithmetic.Nat n
+  -> Int -- size hint
+  -> ST s (MutableIntVector s n, MutableVector s n (MutableByteArray s))
+initializeBuilders n hint = do
   v <- V.new n
-  offs <- V.replicateM n (0 :: Int)
+  offs <- Int.replicateM n (0 :: Int)
   Index.ascendM
     ( \(Index.Index lt ix) -> do
       x <- PM.newByteArray hint
       V.write lt v ix x
     ) n
-  goFields n v offs fields
-  -- goPrefixes n v offs prefixes
+  pure (offs, v)
+
+finalizeBuilders :: 
+     Arithmetic.Nat n
+  -> MutableIntVector s n
+  -> MutableVector s n (MutableByteArray s)
+  -> ST s (Vector n ByteArray)
+finalizeBuilders n offs v = do
   r <- V.new n
   Index.ascendM
     ( \(Index.Index lt ix) -> do
-      sz <- V.read lt offs ix
+      sz <- Int.read lt offs ix
       V.write lt r ix
         =<< PM.unsafeFreezeByteArray
         =<< flip PM.resizeMutableByteArray sz
@@ -75,16 +94,51 @@ encodeInternal hint n (A.Record fields _ _) = runST $ do
     ) n
   V.unsafeFreeze r
 
-goFields ::
+encodeMandatoryInternal ::
+     Int -- ^ Size hint
+  -> Arithmetic.Nat n
+  -> A.Record Vectorized Apply2 n m
+  -> Vector n ByteArray
+encodeMandatoryInternal hint n (A.Record fields _ _) = runST $ do
+  (offs,v) <- initializeBuilders n hint
+  goMandatoryFields n v offs fields
+  finalizeBuilders n offs v
+
+encodeOptionalInternal ::
+     Int -- ^ Size hint
+  -> Arithmetic.Nat n
+  -> A.Record Vectorized WithBools n m
+  -> Vector n ByteArray
+encodeOptionalInternal hint n (A.Record fields _ _) = runST $ do
+  (offs,v) <- initializeBuilders n hint
+  goOptionalFields n v offs fields
+  finalizeBuilders n offs v
+
+goOptionalFields ::
      Arithmetic.Nat n
   -> MutableVector s n (MutableByteArray s)
-  -> MutableVector s n Int -- indexes into byte arrays (unchecked)
-  -> A.Tree @B.FieldHeight @'A.Zero @() (ApConst2 (Vectorized n)) flds 'VecNil
+  -> MutableIntVector s n -- indexes into byte arrays (unchecked)
+  -> A.Tree @B.FieldHeight @'A.Zero @() (ApConst2 (WithBools Vectorized n)) flds 'VecNil
   -> ST s ()
-goFields n bufs offs t = do
+goOptionalFields n bufs offs t = do
+  _ <- A.iomnitraverse_ quotedEscapedFields
+    (\_ (Enc keyColon _ (EncodeOptional pasteOpt)) (ApConst2 (WithBools bs (Vectorized v))) -> do
+      pushOptChar ',' n bs bufs offs
+      pushOptBytes keyColon n bs bufs offs
+      pasteOpt bufs offs bs n v
+    ) 0 t
+  cleanupObjectBraces n bufs offs
+
+goMandatoryFields ::
+     Arithmetic.Nat n
+  -> MutableVector s n (MutableByteArray s)
+  -> MutableIntVector s n -- indexes into byte arrays (unchecked)
+  -> A.Tree @B.FieldHeight @'A.Zero @() (ApConst2 (Apply2 Vectorized n)) flds 'VecNil
+  -> ST s ()
+goMandatoryFields n bufs offs t = do
   pushChar '{' n bufs offs
   _ <- A.iomnitraverse_ quotedEscapedFields
-    (\i (Enc keyColon (Encode paste)) (ApConst2 (Vectorized v)) -> do
+    (\i (Enc keyColon (Encode paste) _) (ApConst2 (Apply2 (Vectorized v))) -> do
       when (i /= 0) $ do
         pushChar ',' n bufs offs
       pushBytes keyColon n bufs offs
@@ -110,23 +164,66 @@ goFields n bufs offs t = do
 --       ) n
 --   ) A.FingerNil t
 
+pushOptChar :: 
+     Char
+  -> Arithmetic.Nat n
+  -> BoolVector n
+  -> MutableVector s n (MutableByteArray s)
+  -> MutableIntVector s n -- indexes into byte arrays (unchecked)
+  -> ST s ()
+pushOptChar !c !n !bs !bufs !offs = do
+  let !w = c2w c
+  Index.ascendM
+    ( \(Index.Index lt ix) -> do
+      let present = Bool.index lt bs ix
+      if present
+        then do
+          buf0 <- V.read lt bufs ix
+          off0 <- Int.read lt offs ix
+          MutableByteArrayOffset buf1 off1 <-
+            BB.pasteGrowST (BB.word8 w) (MutableByteArrayOffset buf0 off0)
+          V.write lt bufs ix buf1
+          Int.write lt offs ix off1
+        else pure ()
+    ) n
+
 pushChar :: 
      Char
   -> Arithmetic.Nat n
   -> MutableVector s n (MutableByteArray s)
-  -> MutableVector s n Int -- indexes into byte arrays (unchecked)
+  -> MutableIntVector s n -- indexes into byte arrays (unchecked)
   -> ST s ()
 pushChar !c !n !bufs !offs = do
   let !w = c2w c
   Index.ascendM
     ( \(Index.Index lt ix) -> do
       buf0 <- V.read lt bufs ix
-      off0 <- V.read lt offs ix
+      off0 <- Int.read lt offs ix
       MutableByteArrayOffset buf1 off1 <-
         BB.pasteGrowST (BB.word8 w) (MutableByteArrayOffset buf0 off0)
       V.write lt bufs ix buf1
-      V.write lt offs ix off1
+      Int.write lt offs ix off1
     ) n
+
+-- This requires that all of the byte arrays are at least
+-- one byte long. This invariant is upheld elsewhere in
+-- this module.
+cleanupObjectBraces :: 
+     Arithmetic.Nat n
+  -> MutableVector s n (MutableByteArray s)
+  -> MutableIntVector s n -- indexes into byte arrays (unchecked)
+  -> ST s ()
+cleanupObjectBraces !n !bufs !offs = Index.ascendM
+  ( \(Index.Index lt ix) -> do
+    buf0 <- V.read lt bufs ix
+    off0 <- Int.read lt offs ix
+    PM.writeByteArray buf0 0 (c2w '{')
+    let off1 = max off0 1
+    MutableByteArrayOffset buf1 off2 <-
+      BB.pasteGrowST (BB.word8 (c2w '}')) (MutableByteArrayOffset buf0 off1)
+    V.write lt bufs ix buf1
+    Int.write lt offs ix off2
+  ) n
 
 -- This implementation can easily be improved. The pasteGrowST
 -- currently used is recursive. It would be better to perform
@@ -135,20 +232,44 @@ pushBytes ::
      ByteArray
   -> Arithmetic.Nat n
   -> MutableVector s n (MutableByteArray s)
-  -> MutableVector s n Int -- indexes into byte arrays (unchecked)
+  -> MutableIntVector s n -- indexes into byte arrays (unchecked)
   -> ST s ()
 pushBytes !ba !n !bufs !offs = do
   let !len = PM.sizeofByteArray ba
   Index.ascendM
     ( \(Index.Index lt ix) -> do
       buf0 <- V.read lt bufs ix
-      off0 <- V.read lt offs ix
+      off0 <- Int.read lt offs ix
       MutableByteArrayOffset buf1 off1 <- BBS.pasteGrowST 16
         (BBS.bytes (Bytes ba 0 len))
         (MutableByteArrayOffset buf0 off0)
       V.write lt bufs ix buf1
-      V.write lt offs ix off1
+      Int.write lt offs ix off1
     ) n
+
+pushOptBytes :: 
+     ByteArray
+  -> Arithmetic.Nat n
+  -> BoolVector n
+  -> MutableVector s n (MutableByteArray s)
+  -> MutableIntVector s n -- indexes into byte arrays (unchecked)
+  -> ST s ()
+pushOptBytes !ba !n !bs !bufs !offs = do
+  let !len = PM.sizeofByteArray ba
+  Index.ascendM
+    ( \(Index.Index lt ix) -> do
+      if Bool.index lt bs ix
+        then do
+          buf0 <- V.read lt bufs ix
+          off0 <- Int.read lt offs ix
+          MutableByteArrayOffset buf1 off1 <- BBS.pasteGrowST 16
+            (BBS.bytes (Bytes ba 0 len))
+            (MutableByteArrayOffset buf0 off0)
+          V.write lt bufs ix buf1
+          Int.write lt offs ix off1
+        else pure ()
+    ) n
+
 
 c2w :: Char -> Word8
 c2w = fromIntegral . ord
@@ -159,8 +280,11 @@ quotedEscapedFields :: A.Omnitree @B.FieldHeight Enc 'VecNil
 quotedEscapedFields = A.omnibuild B.singFieldHeight
   (\fng ->
     let !(SBS x) = TS.toShortByteString ("\"" <> J.encodeField fng <> "\":")
-     in Enc (PM.ByteArray x) (J.pasteMany fng)
+     in Enc (PM.ByteArray x) (J.pasteMany fng) (J.pasteManyOpt fng)
   )
 
 data Enc :: Vec B.FieldHeight Bool -> Type where
-  Enc :: !ByteArray -> Encode (A.VectorizeWorld (B.Represent (B.Interpret v))) -> Enc v
+  Enc :: !ByteArray
+      -> !(Encode (A.VectorizeWorld (B.Represent (B.Interpret v))))
+      -> !(EncodeOptional (A.VectorizeWorld (B.Represent (B.Interpret v))))
+      -> Enc v

@@ -1,18 +1,25 @@
+{-# language DataKinds #-}
+{-# language TypeApplications #-}
+
 signature Accordion.Json.Signature where
 
 import Data.Array.Indexed (MutableVector)
 import Data.Primitive (MutableByteArray,ByteArray)
 import Control.Monad.ST (ST)
 import Data.Text.Short (ShortText)
-import Accordion.Json.Types (Encode)
+import Accordion.Json.Types (Encode,EncodeOptional)
 import qualified Data.Arithmetic.Types as Arithmetic
 import qualified Accordion.Types as A
 import qualified Accordion.World as A
 import qualified Accordion.Base.Signature as S
 
 pasteMany ::
-     A.Finger S.FieldHeight v
+     A.Finger @S.FieldHeight v
   -> Encode (A.VectorizeWorld (S.Represent (S.Interpret v)))
 
-encodeField :: A.Finger S.FieldHeight v -> ShortText
-encodePrefix :: A.Finger S.PrefixHeight v -> ShortText
+pasteManyOpt ::
+     A.Finger @S.FieldHeight v
+  -> EncodeOptional (A.VectorizeWorld (S.Represent (S.Interpret v)))
+
+encodeField :: A.Finger @S.FieldHeight v -> ShortText
+encodePrefix :: A.Finger @S.PrefixHeight v -> ShortText

@@ -10,6 +10,8 @@ library
     , primitive-indexed
     , indexed-array
     , text >= 1.2
+    , text-short
+    , tuples
   hs-source-dirs: src
   default-language: Haskell2010
   ghc-options: -Wall
@@ -19,5 +21,12 @@ library
     Accordion.World
     Accordion.Nat
     Accordion.Fin.N5
+    Accordion.Binary.N0
+    Accordion.Binary.N1
+    Accordion.Binary.N2
+    Accordion.Binary.N3
+    Accordion.Binary.N4
+    Accordion.Binary.N5
+    Accordion.Binary.N6
     Accordion.Gte.N2
     Accordion.Vector

@@ -2,12 +2,13 @@
 {-# language KindSignatures #-}
 {-# language TypeFamilies #-}
 {-# language TypeOperators #-}
+{-# language TypeApplications #-}
 {-# language GADTSyntax #-}
 
 signature Accordion.Base.Signature where
 
 import Accordion.Types (Nat(..),SingNat(..),Vec(..),Finger,Map,Tree)
-import Accordion.World (World(..),Primitive,SingWorld,GroundPrimitive,GroundWorld)
+import Accordion.World (World(..),SingWorld,GroundWorld)
 import Control.Monad.ST (ST)
 import Data.Kind (Type)
 import Data.Type.Equality ((:~:))
@@ -33,11 +34,11 @@ represent :: SingUniverse u -> SingWorld (Represent u)
 
 -- This function is weird. There must be a better way.
 -- No, there is not.
-showIndexField :: Finger FieldHeight v -> String
+-- showIndexField :: Finger FieldHeight v -> String
 
 singFieldHeight :: SingNat FieldHeight
-interpret :: Finger FieldHeight v -> SingUniverse (Interpret v)
-showsPrecUniverse :: SingUniverse u -> Int -> Ground u -> ShowS
+interpret :: Finger @FieldHeight v -> SingUniverse (Interpret v)
+-- showsPrecUniverse :: SingUniverse u -> Int -> Ground u -> ShowS
 
 
 toInternal ::

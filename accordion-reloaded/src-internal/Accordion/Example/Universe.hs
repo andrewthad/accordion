@@ -34,6 +34,7 @@ module Accordion.Example.Universe
   , encodeField
   , encodePrefix
   , pasteMany
+  , pasteManyOpt
   ) where
 
 import Accordion.Example.Types
@@ -95,5 +96,13 @@ pasteMany ::
 pasteMany x = case unindexField x of
   SingAge -> Encode.int
   SingHealth -> Encode.int
+  SingAlive -> Encode.bool
 
+pasteManyOpt ::
+     Finger FieldHeight v
+  -> Json.EncodeOptional (A.VectorizeWorld (Represent (Interpret v)))
+pasteManyOpt x = case unindexField x of
+  SingAge -> Encode.intOpt
+  SingHealth -> Encode.intOpt
+  SingAlive -> Encode.boolOpt
 

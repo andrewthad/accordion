@@ -28,6 +28,7 @@ module Accordion.Types
   , Map(..)
   , SingGte(..)
   , Vec(..)
+  , Rec(..)
   , Set(..)
   , Subset(..)
   , Tree(..)
@@ -35,6 +36,8 @@ module Accordion.Types
   , Finger(..)
   , SingBool(..)
   , Elem(..)
+  , Apply2(..)
+  , WithBools(..)
   , FieldList
     -- data types for instances
     -- type families
@@ -42,6 +45,7 @@ module Accordion.Types
   , Union
   , UnionMeta
   , Singleton
+  , NestedSingleton
     -- functions
   , map
   , traverse
@@ -50,6 +54,7 @@ module Accordion.Types
   , foldMap
   , foldMapF
   , leftUnion
+  , union
   , unionRecord
   , zip
   , zipM_
@@ -73,6 +78,7 @@ import Data.Primitive (Array)
 
 import Data.Index (Index)
 import Data.Array.Indexed (Vector)
+import Data.Array.Bool (BoolVector)
 import qualified Data.Arithmetic.Types as Arithmetic
 import qualified GHC.TypeNats as GHC
 
@@ -93,6 +99,9 @@ data Fin :: Nat -> Type where
 data Vec :: Nat -> Type -> Type where
   VecNil :: Vec 'Zero a
   VecCons :: a -> Vec n a -> Vec ('Succ n) a
+data Rec :: forall (k :: Type). (k -> Type) -> [k] -> Type where
+  RecNil :: Rec f '[]
+  RecCons :: f r -> Rec f rs -> Rec f (r ': rs)
 
 data Meta :: Nat -> Nat -> Nat -> Type where
   Meta ::
@@ -162,9 +171,9 @@ data Subset (h :: Nat) (n :: Nat) (s :: Set h n) (r :: Set h n) where
 
 -- Consider inlining SingBool into the FingerCons data constructor.
 -- This could improve performance but needs to be benchmarked.
-data Finger (n :: Nat) (v :: Vec n Bool) where
-  FingerNil :: Finger 'Zero 'VecNil
-  FingerCons :: SingBool b -> Finger n v -> Finger ('Succ n) ('VecCons b v)
+data Finger :: forall (n :: Nat). Vec n Bool -> Type where
+  FingerNil :: Finger @'Zero 'VecNil
+  FingerCons :: SingBool b -> Finger @n v -> Finger @('Succ n) ('VecCons b v)
 data SingBool :: Bool -> Type where
   SingFalse :: SingBool 'False
   SingTrue :: SingBool 'True
@@ -195,6 +204,7 @@ data Collection ::
     forall (ph :: Nat). -- Prefix height
     forall (mh :: Nat). -- Multi height
     (GHC.Nat -> Vec fh Bool -> Type) -> -- Leaf Interpreter
+    ((GHC.Nat -> Vec fh Bool -> Type) -> (GHC.Nat -> Vec fh Bool -> Type)) -> -- Interpreter modifier, used for optional
     GHC.Nat ->
     Meta fh ph mh ->
     Type
@@ -202,8 +212,19 @@ data Collection ::
   Collection ::
        Arithmetic.Nat ch
     -> Vector par (Array (Index ch))
-    -> Record i ch meta
-    -> Collection i par meta
+    -> Record i imod ch meta
+    -> Collection i imod par meta
+
+newtype Apply2 :: forall (a :: Type) (b :: Type). (a -> b -> Type) -> a -> b -> Type where
+  Apply2 :: f x y -> Apply2 f x y
+
+data WithBools :: forall (h :: Nat).
+    (GHC.Nat -> Vec h Bool -> Type) ->
+    GHC.Nat ->
+    Vec h Bool ->
+    Type
+  where
+  WithBools :: !(BoolVector n) -> i n v -> WithBools i n v
 
 -- As we descend, the interpreter tweaks itself. Sort of. This
 -- does not yet have any special treatment for 0-or-1 values,
@@ -213,6 +234,7 @@ data Record ::
            (ph :: Nat) -- Prefix height
            (mh :: Nat). -- Multi height
     (GHC.Nat -> Vec fh Bool -> Type) -> -- Leaf Interpreter
+    ((GHC.Nat -> Vec fh Bool -> Type) -> (GHC.Nat -> Vec fh Bool -> Type)) -> -- Interpreter modifier, used for optional
     GHC.Nat -> -- Size, that is, number of elements per column
     Meta fh ph mh ->
     Type
@@ -221,25 +243,26 @@ data Record ::
     (fh :: Nat) -- Field height
     (ph :: Nat) -- Prefix height
     (mh :: Nat) -- Multi height
-    (i :: (GHC.Nat -> Vec fh Bool -> Type))
+    (i :: GHC.Nat -> Vec fh Bool -> Type)
+    (imod :: (GHC.Nat -> Vec fh Bool -> Type) -> (GHC.Nat -> Vec fh Bool -> Type))
     (sz :: GHC.Nat) -- Size, that is, number of elements per column
     (f :: Map () fh 'Zero)
     (p :: Map (Meta fh ph mh) ph 'Zero)
     (m :: Map (Meta fh ph mh) mh 'Zero).
-       Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) (i sz)) f 'VecNil
+       Tree @fh @'Zero @() (ApConst2 @() @(Vec fh Bool) (imod i sz)) f 'VecNil
     -> Tree @ph @'Zero @(Meta fh ph mh)
          ( ApConst1
            @(Meta fh ph mh) @(Vec ph Bool)
-           (Record @fh @ph @mh i sz)
+           (Record @fh @ph @mh i imod sz)
          )
          p 'VecNil
     -> Tree @mh @'Zero @(Meta fh ph mh)
          ( ApConst1
            @(Meta fh ph mh) @(Vec mh Bool)
-           (Collection @fh @ph @mh i sz)
+           (Collection @fh @ph @mh i Apply2 sz)
          )
          m 'VecNil
-    -> Record @fh @ph @mh i sz ('Meta f p m)
+    -> Record @fh @ph @mh i imod sz ('Meta f p m)
 
 -- A balanced tree that always has a base-two number of leaves. The
 -- type of the element at each position is determined by the interpretation
@@ -294,10 +317,10 @@ data Omnitree :: forall (h :: Nat) (n :: Nat).
 -- efficiency doesn't really matter.
 omnibuild :: forall h i.
      SingNat h
-  -> (forall v. Finger h v -> i v)
+  -> (forall v. Finger @h v -> i v)
   -> Omnitree @h @'Zero i 'VecNil
 omnibuild h0 f = go (gteZero h0) FingerNil where
-  go :: forall m w. Gte h m -> Finger m w -> Omnitree @h @m i w
+  go :: forall m w. Gte h m -> Finger @m w -> Omnitree @h @m i w
   go GteEq v = OmnitreeLeaf (f v)
   go (GteGt gt) v = OmnitreeBranch (go gt (FingerCons SingFalse v)) (go gt (FingerCons SingTrue v))
 
@@ -351,7 +374,7 @@ empty = TreeEmpty
 singleton ::
      forall (h :: Nat) (n :: Nat) (k :: Type)
             (w :: Vec n Bool) (s :: Map k h n) (i :: k -> Vec h Bool -> Type).
-     Finger n w -- Finger to node under consideration
+     Finger @n w -- Finger to node under consideration
   -> Tree @h @n i s w
   -> Tree @h @'Zero i (Singleton w s) 'VecNil
 singleton FingerNil s = s
@@ -375,13 +398,13 @@ get (ElemBranchRight e) (TreeBranch _ x) = get e x
 -- omniget (ElemBranchRight e) (TreeBranch _ x) = get e x
 
 map ::
-     forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: Map () h n)
-     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type).
-     (forall (v :: Vec h Bool). Finger h v -> i v -> j v)
-  -> Finger n w -- finger to the current nodes
-  -> Tree @h @n (ApConst2 i) s w -- argument tree
-  -> Tree @h @n (ApConst2 j) s w
-map f !v (TreeLeaf (ApConst2 x)) = TreeLeaf (ApConst2 (f v x))
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (j :: k -> Vec h Bool -> Type).
+     (forall (v :: Vec h Bool) (y :: k). Finger @h v -> i y v -> j y v)
+  -> Finger @n w -- finger to the current nodes
+  -> Tree @h @n i s w -- argument tree
+  -> Tree @h @n j s w
+map f !v (TreeLeaf x) = TreeLeaf (f v x)
 map _ !_ TreeEmpty = TreeEmpty
 map f !v (TreeLeft a) = TreeLeft (map f (FingerCons SingFalse v) a)
 map f !v (TreeRight b) = TreeRight (map f (FingerCons SingTrue v) b)
@@ -391,9 +414,9 @@ itraverse_ ::
      forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
      (i :: k -> Vec h Bool -> Type) (m :: Type -> Type).
      Monad m
-  => (forall (v :: Vec h Bool) (y :: k). Int -> Finger h v -> i y v -> m ())
+  => (forall (v :: Vec h Bool) (y :: k). Int -> Finger @h v -> i y v -> m ())
   -> Int -- starting index
-  -> Finger n w -- finger to the current nodes
+  -> Finger @n w -- finger to the current nodes
   -> Tree @h @n @k i s w -- argument tree
   -> m Int
 itraverse_ _ !ix !_ TreeEmpty = pure ix
@@ -408,8 +431,8 @@ traverse ::
      forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (s :: Map () h n)
      (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
      Applicative m
-  => (forall (v :: Vec h Bool). Finger h v -> i v -> m (j v))
-  -> Finger n w -- finger to the current nodes
+  => (forall (v :: Vec h Bool). Finger @h v -> i v -> m (j v))
+  -> Finger @n w -- finger to the current nodes
   -> Tree @h @n @() (ApConst2 i) s w -- argument tree
   -> m (Tree @h @n (ApConst2 j) s w)
 traverse _ !_ TreeEmpty = pure TreeEmpty
@@ -446,8 +469,8 @@ foldMap ::
      forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
      (i :: k -> Vec h Bool -> Type) (m :: Type).
      Monoid m
-  => (forall (v :: Vec h Bool) (y :: k). Finger h v -> i y v -> m)
-  -> Finger n w -- finger to the current nodes
+  => (forall (v :: Vec h Bool) (y :: k). Finger @h v -> i y v -> m)
+  -> Finger @n w -- finger to the current nodes
   -> Tree @h @n i s w -- argument tree
   -> m
 foldMap _ !_ TreeEmpty = mempty
@@ -477,8 +500,8 @@ foldMapF f (TreeBranch a b) = foldMapF f a <> foldMapF f b
 zip :: forall (h :: Nat) (n :: Nat) (z :: Type) (w :: Vec n Bool) (r :: Map z h n)
      (i :: z -> Vec h Bool -> Type) (j :: z -> Vec h Bool -> Type)
      (k :: z -> Vec h Bool -> Type).
-     (forall (v :: Vec h Bool) (y :: z). Finger h v -> i y v -> j y v -> k y v)
-  -> Finger n w -- finger to the current nodes
+     (forall (v :: Vec h Bool) (y :: z). Finger @h v -> i y v -> j y v -> k y v)
+  -> Finger @n w -- finger to the current nodes
   -> Tree @h @n @z i r w -- left tree
   -> Tree @h @n @z j r w -- right tree
   -> Tree @h @n @z k r w -- result tree
@@ -497,8 +520,8 @@ zipM_ ::
      forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: Map () h n) (s :: Map () h n)
      (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
      Applicative m
-  => (forall (v :: Vec h Bool). Finger h v -> i v -> j v -> m ())
-  -> Finger n w -- finger to the current nodes
+  => (forall (v :: Vec h Bool). Finger @h v -> i v -> j v -> m ())
+  -> Finger @n w -- finger to the current nodes
   -> Tree @h @n (ApConst2 i) r w -- left tree
   -> Tree @h @n (ApConst2 j) s w -- right tree
   -> m ()
@@ -557,6 +580,48 @@ leftUnion (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 leftUnion (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 
+-- Union that lets the user choose what to do when only one of the
+-- two is present.
+union ::
+  forall (h :: Nat) (n :: Nat)
+  (w :: Vec n Bool)
+  (r :: Map () h n) (s :: Map () h n)
+  (i :: () -> Vec h Bool -> Type)
+  (j :: () -> Vec h Bool -> Type)
+  (k :: () -> Vec h Bool -> Type).
+     (forall (v :: Vec h Bool) (u1 :: ()) (u2 :: ()). Finger @h v -> i u1 v -> j u2 v -> k u1 v)
+  -> (forall (v :: Vec h Bool) (u1 :: ()). Finger @h v -> i u1 v -> k u1 v)
+  -> (forall (v :: Vec h Bool) (u1 :: ()). Finger @h v -> j u1 v -> k u1 v)
+  -> Finger @n w -- finger to the current nodes
+  -> Tree @h @n @() i r w
+  -> Tree @h @n @() j s w
+  -> Tree @h @n @() k (Union r s) w
+union _ _ h !fng TreeEmpty t = map h fng t
+union _ g _ !fng (TreeLeaf x) TreeEmpty = TreeLeaf (g fng x)
+union f _ _ !fng (TreeLeaf x) (TreeLeaf y) = TreeLeaf (f fng x y)
+union f g h !fng (TreeLeft x) (TreeLeft y) = TreeLeft (union f g h (FingerCons SingFalse fng) x y)
+union f g h !fng (TreeBranch xl xr) (TreeRight yr) =
+  TreeBranch (map g (FingerCons SingFalse fng) xl) (union f g h (FingerCons SingTrue fng) xr yr)
+union f g h !fng (TreeBranch xl xr) (TreeLeft yl) =
+  TreeBranch (union f g h (FingerCons SingFalse fng) xl yl) (map g (FingerCons SingTrue fng) xr)
+union f g h !fng (TreeBranch xl xr) (TreeBranch yl yr) = TreeBranch (union f g h (FingerCons SingFalse fng) xl yl) (union f g h (FingerCons SingTrue fng) xr yr)
+union f g h !fng (TreeLeft xl) (TreeBranch yl yr) =
+  TreeBranch (union f g h (FingerCons SingFalse fng) xl yl) (map h (FingerCons SingTrue fng) yr)
+union f g h !fng (TreeRight xr) (TreeBranch yl yr) =
+  TreeBranch (map h (FingerCons SingFalse fng) yl) (union f g h (FingerCons SingTrue fng) xr yr)
+union f g h !fng (TreeRight x) (TreeRight y) = TreeRight (union f g h (FingerCons SingTrue fng) x y)
+union _ _ _ !_ (TreeLeaf _) (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
+union _ _ _ !_ (TreeBranch t _) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+union _ g _ !fng (TreeBranch xl xr) TreeEmpty = TreeBranch (map g (FingerCons SingFalse fng) xl) (map g (FingerCons SingTrue fng) xr)
+union _ g _ !fng (TreeLeft x) TreeEmpty = TreeLeft (map g (FingerCons SingFalse fng) x)
+union _ g _ !fng (TreeRight x) TreeEmpty = TreeRight (map g (FingerCons SingTrue fng) x)
+union _ g h !fng (TreeLeft x) (TreeRight y) = TreeBranch (map g (FingerCons SingFalse fng) x) (map h (FingerCons SingTrue fng) y)
+union _ g h !fng (TreeRight x) (TreeLeft y) = TreeBranch (map h (FingerCons SingFalse fng) y) (map g (FingerCons SingTrue fng) x)
+union _ _ _ !_ (TreeLeft t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+union _ _ _ !_ (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+union _ _ _ !_ (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
+union _ _ _ !_ (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
+
 -- Recursive helper for unionRecord. This is very nearly a copy of
 -- leftUnion and would be unnecessary if partially applied type
 -- families existed.
@@ -564,10 +629,11 @@ unionPrefixMap ::
   forall (fh :: Nat) (ph :: Nat) (mh :: Nat) (n :: Nat) (sz :: GHC.Nat)
   (w :: Vec n Bool)
   (r :: Map (Meta fh ph mh) ph n) (s :: Map (Meta fh ph mh) ph n)
-  (i :: GHC.Nat -> Vec fh Bool -> Type).
-     Tree @ph @n (ApConst1 (Record i sz)) r w
-  -> Tree @ph @n (ApConst1 (Record i sz)) s w
-  -> Tree @ph @n (ApConst1 (Record i sz)) (UnionPrefix r s) w
+  (i :: GHC.Nat -> Vec fh Bool -> Type)
+  (imod :: (GHC.Nat -> Vec fh Bool -> Type) -> (GHC.Nat -> Vec fh Bool -> Type)).
+     Tree @ph @n (ApConst1 (Record i imod sz)) r w
+  -> Tree @ph @n (ApConst1 (Record i imod sz)) s w
+  -> Tree @ph @n (ApConst1 (Record i imod sz)) (UnionPrefix r s) w
 unionPrefixMap TreeEmpty t = t
 unionPrefixMap (TreeLeaf (ApConst1 x)) TreeEmpty = TreeLeaf (ApConst1 x)
 unionPrefixMap (TreeLeaf (ApConst1 x)) (TreeLeaf (ApConst1 y)) = TreeLeaf (ApConst1 (unionRecord x y))
@@ -593,10 +659,11 @@ unionPrefixMap (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 unionRecord ::
   forall (h :: Nat) (n :: Nat) (p :: Nat)
   (ml :: Meta h n p) (mr :: Meta h n p) (sz :: GHC.Nat)
-  (i :: GHC.Nat -> Vec h Bool -> Type).
-     Record i sz ml
-  -> Record i sz mr
-  -> Record i sz (UnionMeta ml mr)
+  (i :: GHC.Nat -> Vec h Bool -> Type)
+  (imod :: (GHC.Nat -> Vec h Bool -> Type) -> (GHC.Nat -> Vec h Bool -> Type)).
+     Record i imod sz ml
+  -> Record i imod sz mr
+  -> Record i imod sz (UnionMeta ml mr)
 unionRecord (Record fl pl ml) (Record fr pr mr) =
   Record (leftUnion fl fr) (unionPrefixMap pl pr) (leftUnion ml mr)
 
@@ -677,9 +744,13 @@ omnitreeToGte (OmnitreeLeaf _) = GteEq
 type family Empty (h :: Nat) (n :: Nat) (gt :: Gte h n) (v :: Vec n Bool) :: Set h n where
   Empty h h 'GteEq bs = 'SetLeaf
   
+type family NestedSingleton (p :: [Vec ph Bool]) (v :: Vec n Bool) (x :: k) :: Meta fh ph mh where
+  NestedSingleton '[] v x = 'Meta (Singleton v ('MapLeaf x)) 'MapEmpty 'MapEmpty
+  NestedSingleton (y ': ys) v x =
+    'Meta 'MapEmpty (Singleton y ('MapLeaf (NestedSingleton ys v x))) 'MapEmpty
+
 -- Construct a singleton set. One leaf is true and all others
 -- are false.
--- TODO: Generalize this. It would not be hard.
 type family Singleton (v :: Vec n Bool) (x :: Map k h n) :: Map k h 'Zero where
   Singleton 'VecNil s = s
   Singleton ('VecCons 'False v) s =

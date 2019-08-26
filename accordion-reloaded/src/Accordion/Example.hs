@@ -11,14 +11,16 @@ module Accordion.Example
   , health
   , age
     -- JSON
-  , encode
+  , encodeRecords
+  , encodeOptionals
   , dump
+  , dumpOpt
   ) where
 
 import Accordion.Example.Base
 import Accordion.Example.Universe
 import Accordion.Example.Types
-import Accordion.Example.Json (encode)
+import Accordion.Example.Json (encodeRecords,encodeOptionals)
 import Data.Char (chr)
 import qualified Accordion.Types as A
 import qualified GHC.Exts as E
@@ -29,7 +31,14 @@ health = index SingHealth
 age :: A.Finger FieldHeight (Index 'Age)
 age = index SingAge
 
+alive :: A.Finger FieldHeight (Index 'Alive)
+alive = index SingAlive
+
 dump :: Records m -> IO ()
-dump = mapM_ (putStrLn . map (chr . fromIntegral) . E.toList) . encode 5
+dump = mapM_ (putStrLn . map (chr . fromIntegral) . E.toList) . encodeRecords 5
+
+dumpOpt :: Optionals m -> IO ()
+dumpOpt =
+  mapM_ (putStrLn . map (chr . fromIntegral) . E.toList) . encodeOptionals 5
 
 

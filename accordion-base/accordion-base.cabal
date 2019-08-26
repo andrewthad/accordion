@@ -9,7 +9,10 @@ library
     , accordion-types
     , indexed-array
     , primitive >= 0.6.4
-  exposed-modules: Accordion.Base
+  exposed-modules:
+    Accordion.Base
+    Accordion.Optionals
+    Accordion.Internal
   signatures: Accordion.Base.Signature
   default-language: Haskell2010
   ghc-options: -Wall
