@@ -50,6 +50,7 @@ module Accordion.Types
   , map
   , traverse
   , itraverse_
+  , traverse_
   , traverseF
   , foldMap
   , foldMapF
@@ -58,12 +59,15 @@ module Accordion.Types
   , unionRecord
   , zip
   , zipM_
+  , zipAllM_
+  , zipSameM_
   , singleton
   , empty
   , omnibuild
   , omnifoldr
   , omnisubset
-  , iomnitraverse_
+  , omnitraverseState_
+  , testEquality
     -- getter and setter
   , get
   ) where
@@ -78,7 +82,8 @@ import Data.Primitive (Array)
 
 import Data.Index (Index)
 import Data.Array.Indexed (Vector)
-import Data.Array.Bool (BoolVector)
+import Data.Type.Equality ((:~:)(Refl))
+import qualified World.Bool as Bool
 import qualified Data.Arithmetic.Types as Arithmetic
 import qualified GHC.TypeNats as GHC
 
@@ -224,7 +229,7 @@ data WithBools :: forall (h :: Nat).
     Vec h Bool ->
     Type
   where
-  WithBools :: !(BoolVector n) -> i n v -> WithBools i n v
+  WithBools :: !(Bool.Vector n) -> i n v -> WithBools i n v
 
 -- As we descend, the interpreter tweaks itself. Sort of. This
 -- does not yet have any special treatment for 0-or-1 values,
@@ -410,6 +415,22 @@ map f !v (TreeLeft a) = TreeLeft (map f (FingerCons SingFalse v) a)
 map f !v (TreeRight b) = TreeRight (map f (FingerCons SingTrue v) b)
 map f !v (TreeBranch a b) = TreeBranch (map f (FingerCons SingFalse v) a) (map f (FingerCons SingTrue v) b)
 
+traverse_ ::
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (m :: Type -> Type).
+     Applicative m
+  => (forall (v :: Vec h Bool) (y :: k). Finger @h v -> i y v -> m ())
+  -> Finger @n w -- finger to the current nodes
+  -> Tree @h @n @k i s w -- argument tree
+  -> m ()
+traverse_ _ !_ TreeEmpty = pure ()
+traverse_ f !v (TreeLeaf x) = f v x
+traverse_ f !v (TreeLeft a) = traverse_ f (FingerCons SingFalse v) a
+traverse_ f !v (TreeRight b) = traverse_ f (FingerCons SingTrue v) b
+traverse_ f !v (TreeBranch a b) =
+     traverse_ f (FingerCons SingFalse v) a
+  *> traverse_ f (FingerCons SingTrue v) b
+
 itraverse_ ::
      forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
      (i :: k -> Vec h Bool -> Type) (m :: Type -> Type).
@@ -514,19 +535,87 @@ zip f !v (TreeBranch xl xr) (TreeBranch yl yr) =
       !r = zip f (FingerCons SingTrue v) xr yr
    in TreeBranch l r
 
+-- Zip the trees together. Record fields must match exactly.
+zipSameM_ :: 
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (r :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (m :: Type -> Type).
+     Applicative m
+  => (forall (v :: Vec h Bool) (y :: k). Finger @h v -> i y v -> i y v -> m ())
+  -> Finger @n w -- finger to the current nodes
+  -> Tree @h @n i r w -- left tree
+  -> Tree @h @n i r w -- right tree
+  -> m ()
+zipSameM_ _ !_ TreeEmpty TreeEmpty = pure ()
+zipSameM_ f !v (TreeLeaf x) (TreeLeaf y) = f v x y
+zipSameM_ f !v (TreeLeft a) (TreeLeft b) = zipSameM_ f (FingerCons SingFalse v) a b
+zipSameM_ f !v (TreeRight a) (TreeRight b) = zipSameM_ f (FingerCons SingTrue v) a b
+zipSameM_ f !v (TreeBranch a1 a2) (TreeBranch b1 b2) =
+     zipSameM_ f (FingerCons SingFalse v) a1 b1
+  *> zipSameM_ f (FingerCons SingTrue v) a2 b2
+
+-- Zip the trees together. The most general zip function.
+zipAllM_ ::
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (r :: Map k h n) (s :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (j :: k -> Vec h Bool -> Type) (m :: Type -> Type).
+     Applicative m
+  => (forall (v :: Vec h Bool) (y :: k). Finger @h v -> i y v -> m ()) -- only in left
+  -> (forall (v :: Vec h Bool) (z :: k). Finger @h v -> j z v -> m ()) -- only in right
+  -> (forall (v :: Vec h Bool) (y :: k) (z :: k). Finger @h v -> i y v -> j z v -> m ()) -- in both
+  -> Finger @n w -- finger to the current nodes
+  -> Tree @h @n i r w -- left tree
+  -> Tree @h @n j s w -- right tree
+  -> m ()
+zipAllM_ _ h _ !v TreeEmpty t = traverse_ h v t
+zipAllM_ _ _ f !v (TreeLeaf x) (TreeLeaf y) = f v x y
+zipAllM_ _ _ _ !_ (TreeLeaf _) (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
+zipAllM_ _ _ _ !_ (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
+zipAllM_ _ _ _ !_ (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
+zipAllM_ g _ _ !v (TreeLeaf x) TreeEmpty = g v x
+zipAllM_ g h _ !v (TreeLeft left) (TreeRight right) =
+     traverse_ g (FingerCons SingFalse v) left
+  *> traverse_ h (FingerCons SingTrue v) right
+zipAllM_ g h f !v (TreeLeft a) (TreeLeft b) = zipAllM_ g h f (FingerCons SingFalse v) a b
+zipAllM_ g h f !v (TreeLeft a) (TreeBranch b c) =
+     zipAllM_ g h f (FingerCons SingFalse v) a b
+  *> traverse_ h (FingerCons SingTrue v) c
+zipAllM_ _ _ _ !_ (TreeLeft t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+zipAllM_ g _ _ !v (TreeLeft t) TreeEmpty = traverse_ g (FingerCons SingFalse v) t
+zipAllM_ g h _ !v (TreeRight right) (TreeLeft left) =
+     traverse_ h (FingerCons SingFalse v) left
+  *> traverse_ g (FingerCons SingTrue v) right
+zipAllM_ g h f !v (TreeRight a) (TreeRight b) = zipAllM_ g h f (FingerCons SingTrue v) a b
+zipAllM_ g h f !v (TreeRight a) (TreeBranch b c) =
+     traverse_ h (FingerCons SingFalse v) b
+  *> zipAllM_ g h f (FingerCons SingTrue v) a c
+zipAllM_ _ _ _ !_ (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+zipAllM_ g _ _ !v (TreeRight t) TreeEmpty = traverse_ g (FingerCons SingTrue v) t
+zipAllM_ g h f !v (TreeBranch a b) (TreeLeft c) =
+     zipAllM_ g h f (FingerCons SingFalse v) a c
+  *> traverse_ g (FingerCons SingTrue v) b
+zipAllM_ g h f !v (TreeBranch a b) (TreeRight c) =
+     traverse_ g (FingerCons SingFalse v) a
+  *> zipAllM_ g h f (FingerCons SingTrue v) b c
+zipAllM_ g h f !v (TreeBranch a1 a2) (TreeBranch b1 b2) =
+     zipAllM_ g h f (FingerCons SingFalse v) a1 b1
+  *> zipAllM_ g h f (FingerCons SingTrue v) a2 b2
+zipAllM_ _ _ _ !_ (TreeBranch t _) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
+zipAllM_ g _ _ !v (TreeBranch left right) TreeEmpty =
+     traverse_ g (FingerCons SingFalse v) left
+  *> traverse_ g (FingerCons SingTrue v) right
+
 -- Zip the trees together. Only apply the function where
 -- leaves are present in both trees.
 zipM_ ::
-     forall (h :: Nat) (n :: Nat) (w :: Vec n Bool) (r :: Map () h n) (s :: Map () h n)
-     (i :: Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
+     forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (r :: Map k h n) (s :: Map k h n)
+     (i :: k -> Vec h Bool -> Type) (j :: k -> Vec h Bool -> Type) (m :: Type -> Type).
      Applicative m
-  => (forall (v :: Vec h Bool). Finger @h v -> i v -> j v -> m ())
+  => (forall (v :: Vec h Bool) (y :: k) (z :: k). Finger @h v -> i y v -> j z v -> m ())
   -> Finger @n w -- finger to the current nodes
-  -> Tree @h @n (ApConst2 i) r w -- left tree
-  -> Tree @h @n (ApConst2 j) s w -- right tree
+  -> Tree @h @n i r w -- left tree
+  -> Tree @h @n j s w -- right tree
   -> m ()
 zipM_ _ !_ TreeEmpty _ = pure ()
-zipM_ f !v (TreeLeaf (ApConst2 x)) (TreeLeaf (ApConst2 y)) = f v x y
+zipM_ f !v (TreeLeaf x) (TreeLeaf y) = f v x y
 zipM_ _ !_ (TreeLeaf _) (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
 zipM_ _ !_ (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 zipM_ _ !_ (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
@@ -622,6 +711,37 @@ union _ _ _ !_ (TreeRight t) (TreeLeaf _) = absurd (impossibleGte (treeToGte t))
 union _ _ _ !_ (TreeLeaf _) (TreeLeft t) = absurd (impossibleGte (treeToGte t))
 union _ _ _ !_ (TreeLeaf _) (TreeRight t) = absurd (impossibleGte (treeToGte t))
 
+testEquality ::
+  forall (h :: Nat) (n :: Nat) (k :: Type)
+  (w :: Vec n Bool)
+  (r :: Map k h n) (s :: Map k h n)
+  (i :: k -> Vec h Bool -> Type)
+  (j :: k -> Vec h Bool -> Type).
+     (forall (v :: Vec h Bool) (u1 :: k) (u2 :: k). i u1 v -> j u2 v -> Maybe (u1 :~: u2))
+  -> Tree i r w
+  -> Tree j s w
+  -> Maybe (r :~: s)
+testEquality _ TreeEmpty TreeEmpty = Just Refl
+testEquality _ TreeEmpty _ = Nothing
+testEquality g (TreeLeft x) (TreeLeft y) = case testEquality g x y of
+  Nothing -> Nothing
+  Just Refl -> Just Refl
+testEquality _ (TreeLeft _) _ = Nothing
+testEquality g (TreeRight x) (TreeRight y) = case testEquality g x y of
+  Nothing -> Nothing
+  Just Refl -> Just Refl
+testEquality _ (TreeRight _) _ = Nothing
+testEquality g (TreeBranch x1 x2) (TreeBranch y1 y2) = case testEquality g x1 y1 of
+  Nothing -> Nothing
+  Just Refl -> case testEquality g x2 y2 of
+    Nothing -> Nothing
+    Just Refl -> Just Refl
+testEquality _ (TreeBranch _ _) _ = Nothing
+testEquality f (TreeLeaf x) (TreeLeaf y) = case f x y of
+  Nothing -> Nothing
+  Just Refl -> Just Refl
+testEquality _ (TreeLeaf _) _ = Nothing
+
 -- Recursive helper for unionRecord. This is very nearly a copy of
 -- leftUnion and would be unnecessary if partially applied type
 -- families existed.
@@ -667,27 +787,30 @@ unionRecord ::
 unionRecord (Record fl pl ml) (Record fr pr mr) =
   Record (leftUnion fl fr) (unionPrefixMap pl pr) (leftUnion ml mr)
 
-iomnitraverse_ ::
+-- | Traverse the tree together with an omnitree. Additionally, provide
+-- a state element that is modified while traversing the trees.
+omnitraverseState_ ::
      forall (h :: Nat) (n :: Nat) (k :: Type) (w :: Vec n Bool) (s :: Map k h n)
-     (i :: k -> Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type).
+     (i :: k -> Vec h Bool -> Type) (j :: Vec h Bool -> Type) (m :: Type -> Type)
+     (a :: Type).
      Monad m
   => Omnitree @h @n j w
-  -> (forall (v :: Vec h Bool) (y :: k). Int -> j v -> i y v -> m ())
-  -> Int -- starting index
+  -> (forall (v :: Vec h Bool) (y :: k). a -> j v -> i y v -> m a)
+  -> a -- starting state
   -> Tree @h @n @k i s w -- argument tree
-  -> m Int
-iomnitraverse_ !_ _ !ix TreeEmpty = pure ix
-iomnitraverse_ (OmnitreeLeaf r) f !ix (TreeLeaf x) = f ix r x $> (ix + 1)
-iomnitraverse_ (OmnitreeLeaf _) _ !_ (TreeLeft t) = absurd (impossibleGte (treeToGte t))
-iomnitraverse_ (OmnitreeLeaf _) _ !_ (TreeRight t) = absurd (impossibleGte (treeToGte t))
-iomnitraverse_ (OmnitreeLeaf _) _ !_ (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
-iomnitraverse_ (OmnitreeBranch x _) _ !_ (TreeLeaf _) =
+  -> m a
+omnitraverseState_ !_ _ ix TreeEmpty = pure ix
+omnitraverseState_ (OmnitreeLeaf r) f ix (TreeLeaf x) = f ix r x
+omnitraverseState_ (OmnitreeLeaf _) _ _ (TreeLeft t) = absurd (impossibleGte (treeToGte t))
+omnitraverseState_ (OmnitreeLeaf _) _ _ (TreeRight t) = absurd (impossibleGte (treeToGte t))
+omnitraverseState_ (OmnitreeLeaf _) _ _ (TreeBranch t _) = absurd (impossibleGte (treeToGte t))
+omnitraverseState_ (OmnitreeBranch x _) _ _ (TreeLeaf _) =
   absurd (impossibleGte (omnitreeToGte x))
-iomnitraverse_ (OmnitreeBranch x _) f !ix (TreeLeft a) = iomnitraverse_ x f ix a
-iomnitraverse_ (OmnitreeBranch _ y) f !ix (TreeRight b) = iomnitraverse_ y f ix b
-iomnitraverse_ (OmnitreeBranch x y) f !ix (TreeBranch a b) = do
-  ix' <- iomnitraverse_ x f ix a
-  iomnitraverse_ y f ix' b
+omnitraverseState_ (OmnitreeBranch x _) f ix (TreeLeft a) = omnitraverseState_ x f ix a
+omnitraverseState_ (OmnitreeBranch _ y) f ix (TreeRight b) = omnitraverseState_ y f ix b
+omnitraverseState_ (OmnitreeBranch x y) f ix (TreeBranch a b) = do
+  ix' <- omnitraverseState_ x f ix a
+  omnitraverseState_ y f ix' b
 
 -- Right fold over the values in a tree using an omnitree for
 -- per-slot behavior.

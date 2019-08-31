@@ -3,6 +3,7 @@
 {-# language GADTSyntax #-}
 {-# language GADTs #-}
 {-# language KindSignatures #-}
+{-# language LambdaCase #-}
 {-# language OverloadedStrings #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
@@ -29,6 +30,7 @@ module Accordion.Ecs.Types
   , Interpret
   , Represent
   , singFieldHeight
+  , singPrefixHeight
   , index
   , indexPrefix
   , interpret
@@ -81,6 +83,7 @@ toInternal ::
   -> GroundWorld (Represent u)
 toInternal n x = case n of
   SingUniWord64 -> x
+  SingUniWord16 -> x
 
 fromInternal ::
      SingUniverse u
@@ -94,23 +97,34 @@ encodeField x = case unindexField x of
   SingAddress -> "address"
   SingBytes -> "bytes"
   SingPort -> "port"
+  SingClassNumber -> "class_number"
+  SingTypeNumber -> "type_number"
+  SingTimestamp -> "timestamp"
 
 encodePrefix :: Finger @PrefixHeight v -> ShortText
 encodePrefix x = case unindexPrefix x of
   SingSource -> "source"
   SingDestination -> "destination"
+  SingDns -> "dns"
+  SingQuestion -> "question"
 
 pasteMany ::
      Finger @FieldHeight v
   -> Json.Encode (A.VectorizeWorld (Represent (Interpret v)))
 pasteMany x = case unindexField x of
   SingPort -> Encode.word16
+  SingClassNumber -> Encode.word16
+  SingTypeNumber -> Encode.word16
+  SingTimestamp -> Encode.word64
 
 pasteManyOpt ::
      Finger @FieldHeight v
   -> Json.EncodeOptional (A.VectorizeWorld (Represent (Interpret v)))
 pasteManyOpt x = case unindexField x of
   SingPort -> Encode.word16Opt
+  SingClassNumber -> Encode.word16Opt
+  SingTypeNumber -> Encode.word16Opt
+  SingTimestamp -> Encode.word64Opt
 
 -- Omitted fields: labels
 data Field
@@ -118,7 +132,8 @@ data Field
   | Bytes -- long
   | CityName -- keyword
   | Class -- keyword
-  | ClassNumber -- keyword
+  | ClassNumber -- extra: word16
+  | TypeNumber -- extra: word16
   | Content -- keyword
   | CountryIsoCode -- keyword
   | CountryName -- keyword
@@ -181,6 +196,7 @@ data SingField :: Field -> Type where
   SingCityName :: SingField 'CityName
   SingClass :: SingField 'Class
   SingClassNumber :: SingField 'ClassNumber
+  SingTypeNumber :: SingField 'TypeNumber
   SingContent :: SingField 'Content
   SingCountryIsoCode :: SingField 'CountryIsoCode
   SingCountryName :: SingField 'CountryName
@@ -288,10 +304,40 @@ type family Unindex (v :: Vec N6 Bool) :: Field where
   Unindex Bin.N24 = 'Class
   Unindex Bin.N25 = 'ClassNumber
   Unindex Bin.N26 = 'ResponseCode
+  Unindex Bin.N27 = 'TypeNumber
 
 type family UnindexPrefix (v :: Vec PrefixHeight Bool) :: Prefix where
-  UnindexPrefix Bin.N0 = 'Source
-  UnindexPrefix Bin.N1 = 'Destination
+  UnindexPrefix Bin.N0 = 'Agent 
+  UnindexPrefix Bin.N1 = 'AutonomousSystem 
+  UnindexPrefix Bin.N2 = 'Body 
+  UnindexPrefix Bin.N3 = 'Client 
+  UnindexPrefix Bin.N4 = 'Cloud 
+  UnindexPrefix Bin.N5 = 'Container 
+  UnindexPrefix Bin.N6 = 'Destination 
+  UnindexPrefix Bin.N7 = 'Dns 
+  UnindexPrefix Bin.N8 = 'Ecs 
+  UnindexPrefix Bin.N9 = 'Error 
+  UnindexPrefix Bin.N10 = 'Event 
+  UnindexPrefix Bin.N11 = 'File 
+  UnindexPrefix Bin.N12 = 'Geo 
+  UnindexPrefix Bin.N13 = 'Group 
+  UnindexPrefix Bin.N14 = 'Host 
+  UnindexPrefix Bin.N15 = 'Http 
+  UnindexPrefix Bin.N16 = 'Log 
+  UnindexPrefix Bin.N17 = 'Network 
+  UnindexPrefix Bin.N18 = 'Observer 
+  UnindexPrefix Bin.N19 = 'OperatingSystem 
+  UnindexPrefix Bin.N20 = 'Organization 
+  UnindexPrefix Bin.N21 = 'Process 
+  UnindexPrefix Bin.N22 = 'Question 
+  UnindexPrefix Bin.N23 = 'Related 
+  UnindexPrefix Bin.N24 = 'Request 
+  UnindexPrefix Bin.N25 = 'Server 
+  UnindexPrefix Bin.N26 = 'Service 
+  UnindexPrefix Bin.N27 = 'Source 
+  UnindexPrefix Bin.N28 = 'Url 
+  UnindexPrefix Bin.N29 = 'User 
+  UnindexPrefix Bin.N30 = 'UserAgent 
 
 type family Index (d :: Field) :: Vec N6 Bool where
   Index 'Address = Bin.N0
@@ -321,6 +367,7 @@ type family Index (d :: Field) :: Vec N6 Bool where
   Index 'Class = Bin.N24
   Index 'ClassNumber = Bin.N25
   Index 'ResponseCode = Bin.N26
+  Index 'TypeNumber = Bin.N27
 
 type family IndexPrefix (d :: Prefix) :: Vec PrefixHeight Bool where
   IndexPrefix 'Agent = Bin.N0
@@ -385,6 +432,7 @@ type family InterpretField (d :: Field) :: Universe where
   InterpretField 'Version = 'UniText
   InterpretField 'Class = 'UniText
   InterpretField 'ClassNumber = 'UniWord16
+  InterpretField 'TypeNumber = 'UniWord16
   InterpretField 'ResponseCode = 'UniText
 
 type family Represent (u :: Universe) :: World where
@@ -423,24 +471,39 @@ type family Ground (u :: Universe) :: Type where
 singFieldHeight :: SingNat N6
 singFieldHeight = n6
 
+singPrefixHeight :: SingNat N6
+singPrefixHeight = n6
+
 unindexField :: forall (v :: Vec N6 Bool). Finger @N6 v -> SingField (Unindex v)
-unindexField = error "write me"
+unindexField Bin.N21 = SingTimestamp
+unindexField Bin.N17 = SingPort
+unindexField Bin.N25 = SingClassNumber
+unindexField Bin.N27 = SingTypeNumber
+unindexField _ = error "unindexField: write me"
 -- unindexField (FingerCons SingTrue (FingerCons SingTrue FingerNil)) = SingAge
 -- unindexField (FingerCons SingFalse (FingerCons SingTrue FingerNil)) = SingHealth
 -- unindexField (FingerCons SingTrue (FingerCons SingFalse FingerNil)) = SingLetter
 -- unindexField (FingerCons SingFalse (FingerCons SingFalse FingerNil)) = SingAlive
 
 unindexPrefix :: Finger @PrefixHeight v -> SingPrefix (UnindexPrefix v)
-unindexPrefix _ = error "uoehtnu"
+unindexPrefix Bin.N7 = SingDns
+unindexPrefix Bin.N22 = SingQuestion
+unindexPrefix Bin.N27 = SingSource
 -- unindexPrefix (FingerCons SingTrue FingerNil) = SingSource
 -- unindexPrefix (FingerCons SingFalse FingerNil) = SingDestination
 
 indexPrefix :: SingPrefix p -> Finger @PrefixHeight (IndexPrefix p)
-indexPrefix = error "uhoetnhu"
+indexPrefix = \case
+  SingDns -> Bin.N7
+  SingQuestion -> Bin.N22
+  SingSource -> Bin.N27
 
 index :: SingField d -> Finger @FieldHeight (Index d)
-index = error "uhoetnuha"
--- index SingAddress = (FingerCons SingTrue (FingerCons SingTrue FingerNil))
+index SingTimestamp = Bin.N21
+index SingPort = Bin.N17
+index SingClassNumber = Bin.N25
+index SingTypeNumber = Bin.N27
+index _ = error "uhoetnuhabethu"
 -- index SingBytes = (FingerCons SingFalse (FingerCons SingTrue FingerNil))
 -- index SingCityName = (FingerCons SingTrue (FingerCons SingFalse FingerNil))
 -- index SingContent = (FingerCons SingFalse (FingerCons SingFalse FingerNil))
@@ -450,6 +513,7 @@ interpret f = case unindexField f of
   SingAddress -> SingUniText
   SingBytes -> SingUniInt64
   SingCityName -> SingUniText
+  SingClassNumber -> SingUniWord16
   SingContent -> SingUniText
   SingCountryIsoCode -> SingUniText
   SingCountryName -> SingUniText
@@ -470,4 +534,5 @@ interpret f = case unindexField f of
   SingTags -> SingUniTags
   SingTimestamp -> SingUniTime
   SingType -> SingUniText
+  SingTypeNumber -> SingUniWord16
   SingVersion -> SingUniText

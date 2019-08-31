@@ -1,3 +1,4 @@
+{-# language BangPatterns #-}
 {-# language GADTs #-}
 {-# language ScopedTypeVariables #-}
 {-# language PolyKinds #-}
@@ -13,6 +14,8 @@ module Accordion.World
   , GroundWorld
   , VectorizeWorld
   , appendVectors
+  , eqVectors
+  , substituteVector
   , singletonVector
   , rightPadVector
   , leftPadVector
@@ -28,16 +31,22 @@ import Data.Array.Int (IntVector)
 import Data.Array.Char (CharVector)
 import Data.Array.Bool (BoolVector)
 import Data.Array.Word16 (Word16Vector)
+import Data.Array.Word64 (Word64Vector)
 import Data.Text.Short (ShortText)
 import Control.Monad.ST (runST)
 import GHC.TypeNats (type (+))
+import Data.Arithmetic.Types ((:=:),Nat)
 
 import qualified Data.Tuple.Types as Tuple
 import qualified GHC.TypeNats as GHC
 import qualified Data.Array.Indexed as V
-import qualified Data.Array.Int as Int
-import qualified Data.Array.Bool as Bool
-import qualified Data.Array.Char as Char
+import qualified World.Int as Int
+import qualified World.Char as Char
+import qualified World.Word8 as Word8
+import qualified World.Bool as Bool
+import qualified World.Word16 as Word16
+import qualified World.Word32 as Word32
+import qualified World.Word64 as Word64
 import qualified Data.Arithmetic.Types as Arithmetic
 import qualified Data.Arithmetic.Nat as Nat
 import qualified Data.Arithmetic.Lt as Lt
@@ -52,6 +61,7 @@ data World
   | Int64
   | Text
   | Texts
+  | Word8
   | Word16
   | Word32
   | Word64
@@ -64,6 +74,7 @@ data SingWorld :: World -> Type where
   SingInt64 :: SingWorld 'Int64
   SingText :: SingWorld 'Text
   SingTexts :: SingWorld 'Texts
+  SingWord8 :: SingWorld 'Word8
   SingWord16 :: SingWorld 'Word16
   SingWord32 :: SingWorld 'Word32
   SingWord64 :: SingWorld 'Word64
@@ -76,64 +87,100 @@ type family GroundWorld (p :: World) :: Type where
   GroundWorld 'Int64 = Int64
   GroundWorld 'Text = ShortText
   GroundWorld 'Texts = [ShortText]
+  GroundWorld 'Word8 = Word8
   GroundWorld 'Word16 = Word16
   GroundWorld 'Word32 = Word32
   GroundWorld 'Word64 = Word64
 
 type family VectorizeWorld (w :: World) :: GHC.Nat -> Type where
-  VectorizeWorld 'Int = IntVector
-  VectorizeWorld 'Bool = BoolVector
-  VectorizeWorld 'Char = CharVector
-  VectorizeWorld 'Word16 = Word16Vector
+  VectorizeWorld 'Int = Int.Vector
+  VectorizeWorld 'Bool = Bool.Vector
+  VectorizeWorld 'Char = Char.Vector
+  VectorizeWorld 'Word8 = Word8.Vector
+  VectorizeWorld 'Word16 = Word16.Vector
+  VectorizeWorld 'Word32 = Word32.Vector
+  VectorizeWorld 'Word64 = Word64.Vector
+
+substituteVector ::
+     SingWorld w
+  -> n :=: m
+  -> VectorizeWorld w n
+  -> VectorizeWorld w m
+substituteVector !w !e !v = case w of
+  SingInt -> Int.substitute e v
+  SingChar -> Char.substitute e v
+  SingWord8 -> Word8.substitute e v
+  SingWord16 -> Word16.substitute e v
+  SingWord64 -> Word64.substitute e v
+
+eqVectors ::
+     SingWorld w
+  -> Nat n
+  -> VectorizeWorld w n
+  -> VectorizeWorld w n
+  -> Bool
+eqVectors !w !n !a !b = case w of
+  SingInt -> Int.equals n a b
+  SingBool -> Bool.equals n a b
+  SingChar -> Char.equals n a b
+  SingWord8 -> Word8.equals n a b
+  SingWord16 -> Word16.equals n a b
+  SingWord64 -> Word64.equals n a b
 
 appendVectors ::
      SingWorld w
+  -> Nat n
+  -> Nat m
   -> VectorizeWorld w n
   -> VectorizeWorld w m
   -> VectorizeWorld w (n + m)
-appendVectors SingInt = Int.append
-appendVectors SingBool = Bool.append
-appendVectors SingChar = Char.append
+appendVectors !w !n !m !a !b = case w of
+  SingInt -> Int.append n m a b
+  SingBool -> Bool.append n m a b
+  SingChar -> Char.append n m a b
+  SingWord8 -> Word8.append n m a b
+  SingWord16 -> Word16.append n m a b
+  SingWord64 -> Word64.append n m a b
 
 singletonVector ::
      SingWorld w
   -> GroundWorld w
   -> VectorizeWorld w 1
-singletonVector SingInt x = Int.singleton x
-singletonVector SingChar x = Char.singleton x
-singletonVector SingBool x = Bool.singleton x
+singletonVector w !x = case w of
+  SingInt -> Int.singleton x
+  SingBool -> Bool.singleton x
+  SingChar -> Char.singleton x
+  SingWord8 -> Word8.singleton x
+  SingWord16 -> Word16.singleton x
+  SingWord64 -> Word64.singleton x
 
 rightPadVector :: forall w m n.
      SingWorld w
-  -> Arithmetic.Nat m
+  -> Nat n
+  -> Nat m
   -> VectorizeWorld w n
   -> VectorizeWorld w (n + m)
-rightPadVector SingInt = \m v -> runST $ do
-  let n = Int.length v
-  marr <- Int.new (Nat.plus n m)
-  Int.copy
-    ( Lt.substituteR (Equal.symmetric (Plus.associative @n @m @1))
-    $ Lt.plus @n (Lt.zero @m)
-    )
-    (Lt.plus @n (Lt.zero @0))
-    marr Nat.zero v Nat.zero n
-  Int.unsafeFreeze marr
+rightPadVector !w !n !m !v = case w of
+  SingInt -> Int.rightPad n m v
+  SingChar -> Char.rightPad n m v
+  SingBool -> Bool.rightPad n m v
+  SingWord8 -> Word8.rightPad n m v
+  SingWord16 -> Word16.rightPad n m v
+  SingWord64 -> Word64.rightPad n m v
 
 leftPadVector :: forall w m n.
      SingWorld w
-  -> Arithmetic.Nat m
+  -> Nat n
+  -> Nat m
   -> VectorizeWorld w n
   -> VectorizeWorld w (m + n)
-leftPadVector SingInt = \m v -> runST $ do
-  let n = Int.length v
-  let totalLen :: Arithmetic.Nat (m + n)
-      totalLen = Nat.plus m n
-  marr <- Int.new totalLen
-  Int.copy
-    (Lt.plus @(m + n) (Lt.zero @0))
-    (Lt.plus @n (Lt.zero @0))
-    marr m v Nat.zero n
-  Int.unsafeFreeze marr
+leftPadVector !w !n !m !v = case w of
+  SingInt -> Int.leftPad n m v
+  SingChar -> Char.leftPad n m v
+  SingBool -> Bool.leftPad n m v
+  SingWord8 -> Word8.leftPad n m v
+  SingWord16 -> Word16.leftPad n m v
+  SingWord64 -> Word64.leftPad n m v
 
 -- type family VectorElem (w :: World (k :: Type)) :: Type where
 --   VectorElem 'Int = Int

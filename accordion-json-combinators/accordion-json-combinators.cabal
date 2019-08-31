@@ -3,6 +3,48 @@ name: accordion-json-combinators
 version: 0.1.0.0
 build-type: Simple
 
+library internal
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , indexed-unboxed-array
+    , indexed-array
+    , primitive
+    , basics
+    , small-bytearray-builder
+  reexported-modules:
+    , Vector.Unboxed.Int
+    , Vector.Unboxed.Bool
+  exposed-modules:
+    Encode
+    Builder.Word64
+    Builder.Word16
+    Builder.Word8
+    Builder.Bool
+    Builder.Int
+  default-language: Haskell2010
+  ghc-options: -Wall -O2
+  hs-source-dirs: src-internal
+  mixins:
+    indexed-unboxed-array (Vector.Unboxed as Vector.Unboxed.Bool)
+      requires (Element as Basics.Bool),
+    indexed-unboxed-array (Vector.Unboxed as Vector.Unboxed.Int)
+      requires (Element as Basics.Int)
+
+-- You need to provide Builder and Element to instantiate this.
+library indef
+  build-depends:
+    , base >= 4.11.1 && < 5
+    , indexed-unboxed-array
+    , indexed-array
+    , internal
+    , small-bytearray-builder
+    , primitive-offset
+  exposed-modules: Encoding
+  default-language: Haskell2010
+  ghc-options: -Wall -O2
+  hs-source-dirs: src-indef
+  signatures: Builder
+
 library
   build-depends:
     , base >= 4.11.1 && < 5
@@ -13,9 +55,23 @@ library
     , accordion-types
     , tuples
     , text >= 1.2
+    , indef
+    , internal
+    , basics
   hs-source-dirs: src
   default-language: Haskell2010
-  ghc-options: -Wall
+  ghc-options: -Wall -O2
   exposed-modules:
     Accordion.Json.Types
     Accordion.Json.Encode
+  mixins:
+    indef (Encoding as Encoding.Word64)
+      requires (Element as Basics.Word64, Builder as Builder.Word64),
+    indef (Encoding as Encoding.Word16)
+      requires (Element as Basics.Word16, Builder as Builder.Word16),
+    indef (Encoding as Encoding.Word8)
+      requires (Element as Basics.Word8, Builder as Builder.Word8),
+    indef (Encoding as Encoding.Bool)
+      requires (Element as Basics.Bool, Builder as Builder.Bool),
+    indef (Encoding as Encoding.Int)
+      requires (Element as Basics.Int, Builder as Builder.Int)

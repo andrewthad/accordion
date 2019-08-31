@@ -17,6 +17,7 @@ library
     , byteslice >=0.1.1 && <0.2
     , bytestring
     , accordion-json-combinators
+    , basics
   exposed-modules:
     Accordion.Json
   signatures:

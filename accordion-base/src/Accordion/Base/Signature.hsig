@@ -37,6 +37,7 @@ represent :: SingUniverse u -> SingWorld (Represent u)
 -- showIndexField :: Finger FieldHeight v -> String
 
 singFieldHeight :: SingNat FieldHeight
+singPrefixHeight :: SingNat PrefixHeight
 interpret :: Finger @FieldHeight v -> SingUniverse (Interpret v)
 -- showsPrecUniverse :: SingUniverse u -> Int -> Ground u -> ShowS
 
