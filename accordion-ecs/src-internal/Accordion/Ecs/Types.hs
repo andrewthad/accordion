@@ -56,7 +56,7 @@ import Data.Kind (Type)
 import Data.Type.Equality ((:~:)(Refl))
 import Accordion.World (World,SingWorld)
 import Chronos (Time)
-import Net.Types (IPv4,Mac)
+import Net.Types (IP,Mac)
 import Data.Int (Int64)
 import Data.Word (Word16,Word64)
 
@@ -100,6 +100,7 @@ encodeField x = case unindexField x of
   SingClassNumber -> "class_number"
   SingTypeNumber -> "type_number"
   SingTimestamp -> "timestamp"
+  SingIp -> "ip"
 
 encodePrefix :: Finger @PrefixHeight v -> ShortText
 encodePrefix x = case unindexPrefix x of
@@ -116,6 +117,7 @@ pasteMany x = case unindexField x of
   SingClassNumber -> Encode.word16
   SingTypeNumber -> Encode.word16
   SingTimestamp -> Encode.word64
+  SingIp -> Encode.word128
 
 pasteManyOpt ::
      Finger @FieldHeight v
@@ -438,7 +440,7 @@ type family InterpretField (d :: Field) :: Universe where
 type family Represent (u :: Universe) :: World where
   Represent 'UniGeo = 'W.DoublePair
   Represent 'UniInt64 = 'W.Int64
-  Represent 'UniIp = 'W.Word32
+  Represent 'UniIp = 'W.Word128
   Represent 'UniMac = 'W.Word64
   Represent 'UniTags = 'W.Texts
   Represent 'UniText = 'W.Text
@@ -449,7 +451,7 @@ type family Represent (u :: Universe) :: World where
 represent :: SingUniverse u -> SingWorld (Represent u)
 represent SingUniGeo = W.SingDoublePair
 represent SingUniInt64 = W.SingInt64
-represent SingUniIp = W.SingWord32
+represent SingUniIp = W.SingWord128
 represent SingUniMac = W.SingWord64
 represent SingUniTags = W.SingTexts
 represent SingUniText = W.SingText
@@ -460,7 +462,7 @@ represent SingUniWord64 = W.SingWord64
 type family Ground (u :: Universe) :: Type where
   Ground 'UniGeo = Tuple.DoublePair
   Ground 'UniInt64 = Int64
-  Ground 'UniIp = IPv4
+  Ground 'UniIp = IP
   Ground 'UniMac = Mac
   Ground 'UniTags = [ShortText]
   Ground 'UniText = ShortText
@@ -479,6 +481,7 @@ unindexField Bin.N21 = SingTimestamp
 unindexField Bin.N17 = SingPort
 unindexField Bin.N25 = SingClassNumber
 unindexField Bin.N27 = SingTypeNumber
+unindexField Bin.N10 = SingIp
 unindexField _ = error "unindexField: write me"
 -- unindexField (FingerCons SingTrue (FingerCons SingTrue FingerNil)) = SingAge
 -- unindexField (FingerCons SingFalse (FingerCons SingTrue FingerNil)) = SingHealth
@@ -503,6 +506,7 @@ index SingTimestamp = Bin.N21
 index SingPort = Bin.N17
 index SingClassNumber = Bin.N25
 index SingTypeNumber = Bin.N27
+index SingIp = Bin.N10
 index _ = error "uhoetnuhabethu"
 -- index SingBytes = (FingerCons SingFalse (FingerCons SingTrue FingerNil))
 -- index SingCityName = (FingerCons SingTrue (FingerCons SingFalse FingerNil))

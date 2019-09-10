@@ -1,4 +1,5 @@
 {-# language KindSignatures #-}
+{-# language PolyKinds #-}
 {-# language DataKinds #-}
 {-# language GADTs #-}
 
@@ -7,7 +8,10 @@ module Accordion.Ecs
   , Optionals(..)
   , column
   , nestedColumn
+  , column1
   , single
+  , single1
+  , single2
   , nestedSingle
   , union
   , empty
@@ -17,6 +21,7 @@ module Accordion.Ecs
   , question
   , classNumber
   , typeNumber
+  , ip
     -- * Prefixes
   , dns
   , source
@@ -26,6 +31,7 @@ import Accordion.Ecs.Optionals
 import Accordion.Ecs.Types
 import Accordion.Ecs.Json
 import Data.Type.Equality ((:~:)(Refl))
+import Accordion.World (VectorizeWorld)
 
 import qualified Data.Primitive as PM
 import qualified Data.Arithmetic.Nat as Nat
@@ -49,6 +55,29 @@ instance Eq Attributes where
         then equalsHetero n1 a1 (substitute equal a2)
         else False
 
+column1 ::
+     A.Finger p1
+  -> A.Finger f1
+  -> Bool.Vector n
+  -> VectorizeWorld (Represent (Interpret f1)) n
+  -> Optionals n (A.NestedSingleton '[p1] f1 '())
+column1 p1 f1 = nestedColumn (A.RecCons p1 A.RecNil) f1
+
+single1 ::
+     A.Finger p1
+  -> A.Finger f1
+  -> Ground (Interpret f1)
+  -> Optionals 1 (A.NestedSingleton '[p1] f1 '())
+single1 p1 f1 = nestedSingle (A.RecCons p1 A.RecNil) f1
+
+single2 ::
+     A.Finger p1
+  -> A.Finger p2
+  -> A.Finger f1
+  -> Ground (Interpret f1)
+  -> Optionals 1 (A.NestedSingleton '[p1,p2] f1 '())
+single2 p1 p2 f1 = nestedSingle (A.RecCons p1 (A.RecCons p2 A.RecNil)) f1
+
 toJson :: Attributes -> PM.Array PM.ByteArray
 toJson (Attributes n ts rs) = encodeOptionals 5 n
   ( union
@@ -61,6 +90,9 @@ timestamp = index SingTimestamp
 
 port :: A.Finger (Index 'Port)
 port = index SingPort
+
+ip :: A.Finger (Index 'Ip)
+ip = index SingIp
 
 classNumber :: A.Finger (Index 'ClassNumber)
 classNumber = index SingClassNumber

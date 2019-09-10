@@ -27,14 +27,14 @@ module Indefinite
 import Prelude hiding (replicate)
 
 import Control.Monad.ST (ST,runST)
-import Data.Arithmetic.Types (Nat)
+import Arithmetic.Types (Nat)
 import Element (T)
 import GHC.TypeNats (type (+))
 
-import qualified Data.Arithmetic.Equal as Equal
-import qualified Data.Arithmetic.Lt as Lt
-import qualified Data.Arithmetic.Nat as Nat
-import qualified Data.Arithmetic.Plus as Plus
+import qualified Arithmetic.Equal as Equal
+import qualified Arithmetic.Lt as Lt
+import qualified Arithmetic.Nat as Nat
+import qualified Arithmetic.Plus as Plus
 import qualified Vector.Unboxed as V
 
 append :: forall m n. Nat m -> Nat n -> V.Vector m -> V.Vector n -> V.Vector (m + n)
@@ -91,11 +91,11 @@ leftPad n m v = runST $ do
 replicate :: forall n. Nat n -> T -> V.Vector n
 replicate n t = runST $ do
   m <- V.uninitialized n
-  V.set (Lt.plus @n (Lt.zero @0)) m Nat.zero n t
+  V.set (Lt.plus @n Lt.zero) m Nat.zero n t
   V.unsafeFreeze m
 
 initialized :: forall n s. Nat n -> T -> ST s (V.MutableVector s n)
 initialized n t = do
   m <- V.uninitialized n
-  V.set (Lt.plus @n (Lt.zero @0)) m Nat.zero n t
+  V.set (Lt.plus @n Lt.zero) m Nat.zero n t
   pure m

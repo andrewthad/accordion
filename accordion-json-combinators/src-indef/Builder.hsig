@@ -1,6 +1,6 @@
 signature Builder where
 
 import Element (T)
-import Data.ByteArray.Builder.Small (Builder)
+import Data.ByteArray.Builder (Builder)
 
 builder :: T -> Builder

@@ -26,20 +26,11 @@ module Accordion.Json.Encode
   ) where
 
 import Accordion.Json.Types (Encode(..),EncodeOptional(..))
-import Data.Primitive.ByteArray.Offset (MutableByteArrayOffset(..))
-import Data.Tuple.Types (DoublePair(..))
-import Data.Word (Word8)
-import Data.Char (ord)
-import Data.Array.DoublePair (DoublePairVector)
 import qualified Encoding.Word64 as Word64
 import qualified Encoding.Word16 as Word16
 import qualified Encoding.Word8 as Word8
 import qualified Encoding.Int as Int
 import qualified Encoding.Bool as Bool
-
-import qualified Data.Index as Index
-import qualified Data.Array.Indexed as V
-import qualified Data.ByteArray.Builder.Small.Unsafe as BB
 
 bool :: Encode Bool.Vector
 bool = Bool.req

@@ -9,7 +9,7 @@ module Encoding
 import Builder (builder)
 import Encode (Encode(..),EncodeOptional(..))
 import Data.Primitive.ByteArray.Offset (MutableByteArrayOffset(..))
-import qualified Data.ByteArray.Builder.Small as BB
+import qualified Data.ByteArray.Builder as BB
 import qualified Data.Index as Index
 import qualified Vector.Unboxed.Int as Int
 import qualified Vector.Unboxed.Bool as Bool

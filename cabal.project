@@ -1,11 +1,7 @@
-packages: */*.cabal ../primitive-indexed ../indexed-array ../small-bytearray-builder ../zeek-json ../unpacked-maybe-text ../smith ../json-tokenize ../array-chunks ../array-builder ../base62 ../basics ../indexed-unboxed-array
+packages: */*.cabal ../primitive-indexed ../indexed-array ../small-bytearray-builder ../zeek-json ../unpacked-maybe-text ../smith ../json-tokenize ../array-chunks ../array-builder ../base62 ../basics ../indexed-unboxed-array ../haskell-ip
 with-compiler: ghc-8.8.1
 allow-newer: *
 
-source-repository-package
-  type: git
-  location: https://github.com/andrewthad/haskell-ip
-  tag: 0f90d47ed945e1540e90d3dc38d263d5ac65368d
 source-repository-package
   type: git
   location: https://github.com/andrewthad/unpacked-maybe-numeric

@@ -46,6 +46,7 @@ library
     , accordion-types
     , basics
     , deferred
+    , ip
   default-language: Haskell2010
   hs-source-dirs: src
   exposed-modules:
@@ -60,6 +61,7 @@ library
     accordion-json (Accordion.Json as Accordion.Ecs.Json)
       requires (Accordion.Json.Signature as Accordion.Ecs.Types,
                 Accordion.Base.Signature as Accordion.Ecs.Types),
+    deferred (Deferred as Deferred.Word128) requires (Element as Basics.Word128),
     deferred (Deferred as Deferred.Word64) requires (Element as Basics.Word64),
     deferred (Deferred as Deferred.Word16) requires (Element as Basics.Word16)
 

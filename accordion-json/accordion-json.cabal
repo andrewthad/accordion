@@ -5,24 +5,25 @@ build-type: Simple
 
 library
   build-depends:
-    , base >= 4.11.1 && < 5
-    , accordion-types
     , accordion-base
+    , accordion-json-combinators
+    , accordion-types
+    , base >= 4.11.1 && < 5
+    , basics
+    , byteslice >=0.1.1 && <0.2
+    , bytestring
+    , indexed-array
+    , natural-arithmetic
     , primitive-checked >=0.7
     , primitive-offset >=0.2
     , small-bytearray-builder
-    , indexed-array
     , text
     , text-short >=0.1.1 && <0.2
-    , byteslice >=0.1.1 && <0.2
-    , bytestring
-    , accordion-json-combinators
-    , basics
   exposed-modules:
     Accordion.Json
   signatures:
     Accordion.Json.Signature
     Accordion.Base.Signature
   default-language: Haskell2010
-  ghc-options: -Wall
+  ghc-options: -Wall -O2
   hs-source-dirs: src

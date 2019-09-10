@@ -36,6 +36,7 @@ import Data.Text.Short (ShortText)
 import Control.Monad.ST (runST)
 import GHC.TypeNats (type (+))
 import Data.Arithmetic.Types ((:=:),Nat)
+import Data.WideWord.Word128 (Word128)
 
 import qualified Data.Tuple.Types as Tuple
 import qualified GHC.TypeNats as GHC
@@ -47,6 +48,7 @@ import qualified World.Bool as Bool
 import qualified World.Word16 as Word16
 import qualified World.Word32 as Word32
 import qualified World.Word64 as Word64
+import qualified World.Word128 as Word128
 import qualified Data.Arithmetic.Types as Arithmetic
 import qualified Data.Arithmetic.Nat as Nat
 import qualified Data.Arithmetic.Lt as Lt
@@ -65,6 +67,7 @@ data World
   | Word16
   | Word32
   | Word64
+  | Word128
 
 data SingWorld :: World -> Type where
   SingBool :: SingWorld 'Bool
@@ -78,6 +81,7 @@ data SingWorld :: World -> Type where
   SingWord16 :: SingWorld 'Word16
   SingWord32 :: SingWorld 'Word32
   SingWord64 :: SingWorld 'Word64
+  SingWord128 :: SingWorld 'Word128
 
 type family GroundWorld (p :: World) :: Type where
   GroundWorld 'Bool = Bool
@@ -91,6 +95,7 @@ type family GroundWorld (p :: World) :: Type where
   GroundWorld 'Word16 = Word16
   GroundWorld 'Word32 = Word32
   GroundWorld 'Word64 = Word64
+  GroundWorld 'Word128 = Word128
 
 type family VectorizeWorld (w :: World) :: GHC.Nat -> Type where
   VectorizeWorld 'Int = Int.Vector
@@ -100,6 +105,7 @@ type family VectorizeWorld (w :: World) :: GHC.Nat -> Type where
   VectorizeWorld 'Word16 = Word16.Vector
   VectorizeWorld 'Word32 = Word32.Vector
   VectorizeWorld 'Word64 = Word64.Vector
+  VectorizeWorld 'Word128 = Word128.Vector
 
 substituteVector ::
      SingWorld w
@@ -126,6 +132,7 @@ eqVectors !w !n !a !b = case w of
   SingWord8 -> Word8.equals n a b
   SingWord16 -> Word16.equals n a b
   SingWord64 -> Word64.equals n a b
+  SingWord128 -> Word128.equals n a b
 
 appendVectors ::
      SingWorld w
@@ -141,6 +148,7 @@ appendVectors !w !n !m !a !b = case w of
   SingWord8 -> Word8.append n m a b
   SingWord16 -> Word16.append n m a b
   SingWord64 -> Word64.append n m a b
+  SingWord128 -> Word128.append n m a b
 
 singletonVector ::
      SingWorld w
@@ -153,6 +161,7 @@ singletonVector w !x = case w of
   SingWord8 -> Word8.singleton x
   SingWord16 -> Word16.singleton x
   SingWord64 -> Word64.singleton x
+  SingWord128 -> Word128.singleton x
 
 rightPadVector :: forall w m n.
      SingWorld w
@@ -167,6 +176,7 @@ rightPadVector !w !n !m !v = case w of
   SingWord8 -> Word8.rightPad n m v
   SingWord16 -> Word16.rightPad n m v
   SingWord64 -> Word64.rightPad n m v
+  SingWord128 -> Word128.rightPad n m v
 
 leftPadVector :: forall w m n.
      SingWorld w
@@ -181,6 +191,7 @@ leftPadVector !w !n !m !v = case w of
   SingWord8 -> Word8.leftPad n m v
   SingWord16 -> Word16.leftPad n m v
   SingWord64 -> Word64.leftPad n m v
+  SingWord128 -> Word128.leftPad n m v
 
 -- type family VectorElem (w :: World (k :: Type)) :: Type where
 --   VectorElem 'Int = Int

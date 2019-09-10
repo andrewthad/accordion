@@ -25,6 +25,7 @@ module Accordion.Types
   , Meta(..)
   , MetaEmpty
   , MetaFields
+  , MetaPrefixes
   , Map(..)
   , SingGte(..)
   , Vec(..)
@@ -117,6 +118,7 @@ data Meta :: Nat -> Nat -> Nat -> Type where
 
 type MetaEmpty = 'Meta 'MapEmpty 'MapEmpty 'MapEmpty
 type MetaFields x = 'Meta x 'MapEmpty 'MapEmpty
+type MetaPrefixes x = 'Meta 'MapEmpty x 'MapEmpty
 
 -- A finite set. The first number is the total height (total possible
 -- size is 2^h). The second number is how far down from the root

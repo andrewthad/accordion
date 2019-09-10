@@ -39,17 +39,11 @@ testA = case Zeek.decode (Bytes.fromByteArray encodedDnsLog) of
       let expected = Ecs.Attributes
             Nat.one
             ( Word64.singleton 1565528573524392000)
-            ( Ecs.nestedSingle 
-              (RecCons Ecs.dns $ RecCons Ecs.question $ RecNil)
-              Ecs.classNumber 1
+            ( Ecs.single2 Ecs.dns Ecs.question Ecs.classNumber 1
               `Ecs.union`
-              Ecs.nestedSingle 
-              (RecCons Ecs.dns $ RecCons Ecs.question $ RecNil)
-              Ecs.typeNumber 1
+              Ecs.single2 Ecs.dns Ecs.question Ecs.typeNumber 1
               `Ecs.union`
-              Ecs.nestedSingle 
-              (RecCons Ecs.source $ RecNil)
-              Ecs.port 33550
+              Ecs.single1 Ecs.source Ecs.port 33550
             )
       let success = expected == attrs
       when (not success) $

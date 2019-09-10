@@ -6,13 +6,14 @@ module Builder.Bool
 
 import Data.Word (Word8)
 import Data.Char (ord)
-import qualified Data.ByteArray.Builder.Small as B
-import qualified Data.ByteArray.Builder.Small.Unsafe as BU
+import qualified Arithmetic.Nat as Nat
+import qualified Data.ByteArray.Builder as B
+import qualified Data.ByteArray.Builder.Bounded as BU
 
 builder :: Bool -> B.Builder
 builder b = case b of
-  True -> B.fromUnsafe encodeTrue
-  False -> B.fromUnsafe encodeFalse
+  True -> B.fromBounded Nat.constant encodeTrue
+  False -> B.fromBounded Nat.constant encodeFalse
 
 encodeTrue :: BU.Builder 4
 encodeTrue = 

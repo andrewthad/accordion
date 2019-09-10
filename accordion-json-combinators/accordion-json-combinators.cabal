@@ -11,11 +11,15 @@ library internal
     , primitive
     , basics
     , small-bytearray-builder
+    , natural-arithmetic
+    , ip >= 1.5.2
+    , wide-word
   reexported-modules:
     , Vector.Unboxed.Int
     , Vector.Unboxed.Bool
   exposed-modules:
     Encode
+    Builder.Ip
     Builder.Word64
     Builder.Word16
     Builder.Word8
@@ -65,6 +69,8 @@ library
     Accordion.Json.Types
     Accordion.Json.Encode
   mixins:
+    indef (Encoding as Encoding.Ip)
+      requires (Element as Basics.Word128, Builder as Builder.Ip),
     indef (Encoding as Encoding.Word64)
       requires (Element as Basics.Word64, Builder as Builder.Word64),
     indef (Encoding as Encoding.Word16)

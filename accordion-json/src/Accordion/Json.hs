@@ -32,6 +32,7 @@ import Data.Kind (Type)
 import Accordion.Json.Types (Encode(..),EncodeOptional(..))
 import Accordion.Types (Apply2(..),WithBools(..))
 
+import qualified Arithmetic.Nat as Nat
 import qualified World.Int as Int
 import qualified World.Bool as Bool
 import qualified Accordion.Base as Base
@@ -43,12 +44,11 @@ import qualified Accordion.Types as A
 import qualified Accordion.World as A
 import qualified Data.Arithmetic.Types as Arithmetic
 import qualified Data.Arithmetic.Lt as Lt
-import qualified Data.Arithmetic.Nat as Nat
 import qualified Data.Array.Indexed as V
 import qualified Data.Index as Index
 import qualified Data.Primitive as PM
-import qualified Data.ByteArray.Builder.Small.Unsafe as BB
-import qualified Data.ByteArray.Builder.Small as BBS
+import qualified Data.ByteArray.Builder.Bounded as BB
+import qualified Data.ByteArray.Builder as BBS
 import qualified Data.Text.Short as TS
 import qualified GHC.TypeNats as GHC
 
@@ -224,7 +224,7 @@ pushOptCommaAndUpdateIsFirsts !n !isFirsts !bs !bufs !offs = do
         buf0 <- V.read lt bufs ix
         off0 <- Int.read lt offs ix
         MutableByteArrayOffset buf1 off1 <-
-          BB.pasteGrowST (BB.word8 (c2w ',')) (MutableByteArrayOffset buf0 off0)
+          BB.pasteGrowST Nat.constant (BB.word8 (c2w ',')) (MutableByteArrayOffset buf0 off0)
         V.write lt bufs ix buf1
         Int.write lt offs ix off1
     ) n
@@ -245,7 +245,7 @@ pushCommaBeforeSubfield !n !isFirsts !bufs !offs = do
         buf0 <- V.read lt bufs ix
         off0 <- Int.read lt offs ix
         MutableByteArrayOffset buf1 off1 <-
-          BB.pasteGrowST (BB.word8 (c2w ',')) (MutableByteArrayOffset buf0 off0)
+          BB.pasteGrowST Nat.constant (BB.word8 (c2w ',')) (MutableByteArrayOffset buf0 off0)
         V.write lt bufs ix buf1
         Int.write lt offs ix off1
     ) n
@@ -263,7 +263,7 @@ pushChar !c !n !bufs !offs = do
       buf0 <- V.read lt bufs ix
       off0 <- Int.read lt offs ix
       MutableByteArrayOffset buf1 off1 <-
-        BB.pasteGrowST (BB.word8 w) (MutableByteArrayOffset buf0 off0)
+        BB.pasteGrowST Nat.constant (BB.word8 w) (MutableByteArrayOffset buf0 off0)
       V.write lt bufs ix buf1
       Int.write lt offs ix off1
     ) n
@@ -285,7 +285,7 @@ cleanupObjectBraces !n !bufs !offs = Index.ascendM
     PM.writeByteArray buf0 0 (c2w '{')
     let off1 = max off0 1
     MutableByteArrayOffset buf1 off2 <-
-      BB.pasteGrowST (BB.word8 (c2w '}')) (MutableByteArrayOffset buf0 off1)
+      BB.pasteGrowST Nat.constant (BB.word8 (c2w '}')) (MutableByteArrayOffset buf0 off1)
     V.write lt bufs ix buf1
     Int.write lt offs ix off2
   ) n

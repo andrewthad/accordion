@@ -26,6 +26,7 @@ import Data.Word (Word64)
 import Accordion.Ecs (column)
 import Accordion.Types (Rec(RecCons,RecNil))
 import Chronos (Datetime)
+import Net.Types (IP(IP),IPv6(IPv6))
 
 import qualified Chronos
 import qualified Accordion.Ecs as Ecs
@@ -38,6 +39,7 @@ import qualified GHC.TypeNats as GHC
 
 import qualified Deferred.Word16 as Word16
 import qualified Deferred.Word64 as Word64
+import qualified Deferred.Word128 as Word128
 
 -- | This fails if the timestamp is not present for every log.
 zeekToEcs ::
@@ -59,9 +61,10 @@ initializeWorking = do
   dns_question_class <- newSTRef Word16.Absent
   dns_question_type <- newSTRef Word16.Absent
   source_port <- newSTRef Word16.Absent
+  source_ip <- newSTRef Word128.Absent
   pure Working
     { timestamp, dns_question_class, source_port
-    , dns_question_type
+    , dns_question_type, source_ip
     }
 
 -- dns.question.class_number
@@ -116,12 +119,25 @@ freezeC !n !w !opt = do
         bs vs
       )
 
-freezeD ::
+-- source.ip
+freezeD :: 
      Arithmetic.Nat n
   -> Working n s
   -> Ecs.Optionals n rs
   -> ST s (Maybe Attributes)
-freezeD n w opt = do
+freezeD !n !w !opt = do
+  x <- readSTRef (source_ip w)
+  Word128.freeze x >>= \case
+    Nothing -> freezeE n w opt
+    Just (vs,bs) -> freezeE n w
+      $ Ecs.union opt (Ecs.column1 Ecs.source Ecs.ip bs vs)
+
+freezeE ::
+     Arithmetic.Nat n
+  -> Working n s
+  -> Ecs.Optionals n rs
+  -> ST s (Maybe Attributes)
+freezeE n w opt = do
   x <- readSTRef (timestamp w)
   Word64.freeze x >>= \case
     Nothing -> pure Nothing
@@ -138,6 +154,7 @@ data Working (n :: GHC.Nat) s = Working
   , dns_question_class :: !(STRef s (Word16.Deferred s n))
   , dns_question_type :: !(STRef s (Word16.Deferred s n))
   , source_port :: !(STRef s (Word16.Deferred s n))
+  , source_ip :: !(STRef s (Word128.Deferred s n))
   }
 
 steps ::
@@ -157,6 +174,9 @@ step ::
   -> Index n -- offset
   -> ST s ()
 step !src !working !n !ix@(Index lt off) = case src of
+  Zeek.IpAttribute attr (IP (IPv6 val)) -> case attr of
+    Zeek.IdOrigHost -> Word128.write (source_ip working) n ix val
+    _ -> pure ()
   Zeek.Word16Attribute attr val -> case attr of
     Zeek.QueryClass -> Word16.write (dns_question_class working) n ix val
     Zeek.QueryType -> Word16.write (dns_question_type working) n ix val
