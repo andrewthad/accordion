@@ -117,7 +117,7 @@ pasteMany x = case unindexField x of
   SingClassNumber -> Encode.word16
   SingTypeNumber -> Encode.word16
   SingTimestamp -> Encode.word64
-  SingIp -> Encode.word128
+  SingIp -> Encode.ip
 
 pasteManyOpt ::
      Finger @FieldHeight v

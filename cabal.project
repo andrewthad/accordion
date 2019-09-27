@@ -1,4 +1,4 @@
-packages: */*.cabal ../primitive-indexed ../indexed-array ../small-bytearray-builder ../zeek-json ../unpacked-maybe-text ../smith ../json-tokenize ../array-chunks ../array-builder ../base62 ../basics ../indexed-unboxed-array ../haskell-ip
+packages: */*.cabal ../primitive-indexed ../indexed-array ../small-bytearray-builder ../zeek-json ../unpacked-maybe-text ../smith ../json-tokenize ../array-chunks ../array-builder ../base62 ../basics ../indexed-unboxed-array ../haskell-ip ../bytesmith
 with-compiler: ghc-8.8.1
 allow-newer: *
 

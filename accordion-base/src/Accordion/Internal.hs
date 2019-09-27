@@ -24,10 +24,9 @@ import qualified Accordion.World as A
 import qualified Data.Primitive as PM
 import qualified Accordion.Base.Signature as S
 import qualified Data.Array.Indexed as V
-import qualified Data.Array.Bool as Bool
 import qualified GHC.TypeNats as GHC
-import qualified Data.Arithmetic.Types as Arithmetic
-import qualified Data.Arithmetic.Nat as Nat
+import qualified Arithmetic.Types as Arithmetic
+import qualified Arithmetic.Nat as Nat
 import qualified Data.Index as Index
 
 newtype Vectorized :: GHC.Nat -> A.Vec S.FieldHeight Bool -> Type where

@@ -43,6 +43,7 @@ library indef
     , internal
     , small-bytearray-builder
     , primitive-offset
+    , natural-arithmetic
   exposed-modules: Encoding
   default-language: Haskell2010
   ghc-options: -Wall -O2
@@ -58,7 +59,9 @@ library
     , primitive-offset
     , accordion-types
     , tuples
+    , indexed-unboxed-array
     , text >= 1.2
+    , natural-arithmetic
     , indef
     , internal
     , basics
@@ -69,6 +72,8 @@ library
     Accordion.Json.Types
     Accordion.Json.Encode
   mixins:
+    indexed-unboxed-array (Vector.Unboxed as Vector.Unboxed.Word128)
+      requires (Element as Basics.Word128),
     indef (Encoding as Encoding.Ip)
       requires (Element as Basics.Word128, Builder as Builder.Ip),
     indef (Encoding as Encoding.Word64)

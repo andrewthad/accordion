@@ -14,12 +14,13 @@ module Deferred
 
 import Element (T)
 import Control.Monad.ST (ST)
-import Data.Arithmetic.Types (Nat)
+import Arithmetic.Types (Nat)
 import Data.Index (Index(..))
 import Data.STRef (STRef,writeSTRef,readSTRef)
 import qualified GHC.TypeNats as GHC
-import qualified Data.Arithmetic.Nat as Nat
-import qualified Data.Arithmetic.Lt as Lt
+import qualified Arithmetic.Nat as Nat
+import qualified Arithmetic.Lt as Lt
+import qualified Arithmetic.Lte as Lte
 import qualified Element as E
 import qualified Vector.Unboxed as V
 import qualified World.Bool as Bool
@@ -67,5 +68,5 @@ ensure !ref !n = readSTRef ref >>= \case
 initialized :: forall n s. Nat n -> T -> ST s (V.MutableVector s n)
 initialized n t = do
   m <- V.uninitialized n
-  V.set (Lt.plus @n (Lt.zero @0)) m Nat.zero n t
+  V.set Lte.reflexive m Nat.zero n t
   pure m

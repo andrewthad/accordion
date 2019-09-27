@@ -20,7 +20,7 @@ import Data.Array.Indexed (MutableVector)
 import Data.Primitive (MutableByteArray)
 import qualified Vector.Unboxed.Int as Int
 import qualified Vector.Unboxed.Bool as Bool
-import qualified Data.Arithmetic.Types as Arithmetic
+import qualified Arithmetic.Types as Arithmetic
 
 newtype Encode a = Encode (forall s n.
      MutableVector s n (MutableByteArray s)

@@ -8,6 +8,7 @@ library
     , base >= 4.11.1 && < 5
     , accordion-types
     , indexed-array
+    , natural-arithmetic
     , primitive >= 0.6.4
   exposed-modules:
     Accordion.Base

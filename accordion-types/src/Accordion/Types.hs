@@ -85,7 +85,7 @@ import Data.Index (Index)
 import Data.Array.Indexed (Vector)
 import Data.Type.Equality ((:~:)(Refl))
 import qualified World.Bool as Bool
-import qualified Data.Arithmetic.Types as Arithmetic
+import qualified Arithmetic.Types as Arithmetic
 import qualified GHC.TypeNats as GHC
 
 -- newtype Shown :: Type -> Type where

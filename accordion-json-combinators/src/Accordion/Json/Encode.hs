@@ -17,19 +17,23 @@ module Accordion.Json.Encode
   , bool
   , word16
   , word8
+  , ip
     -- optional
   , word64Opt
   , boolOpt
   , intOpt
   , word16Opt
   , word8Opt
+  , ipOpt
   ) where
 
 import Accordion.Json.Types (Encode(..),EncodeOptional(..))
+import qualified Vector.Unboxed.Word128 as Word128
 import qualified Encoding.Word64 as Word64
 import qualified Encoding.Word16 as Word16
 import qualified Encoding.Word8 as Word8
 import qualified Encoding.Int as Int
+import qualified Encoding.Ip as Ip
 import qualified Encoding.Bool as Bool
 
 bool :: Encode Bool.Vector
@@ -61,6 +65,12 @@ int = Int.req
 
 intOpt :: EncodeOptional Int.Vector
 intOpt = Int.opt
+
+ip :: Encode Word128.Vector
+ip = Ip.req
+
+ipOpt :: EncodeOptional Word128.Vector
+ipOpt = Ip.opt
 
 -- | Encode a @DoublePair@ as a two-length array. This can be useful
 -- for converting longitude-latitude pairs to the GeoJSON format expected

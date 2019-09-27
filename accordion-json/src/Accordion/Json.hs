@@ -42,8 +42,8 @@ import qualified Accordion.Base.Signature as B
 import qualified Accordion.Json.Signature as J
 import qualified Accordion.Types as A
 import qualified Accordion.World as A
-import qualified Data.Arithmetic.Types as Arithmetic
-import qualified Data.Arithmetic.Lt as Lt
+import qualified Arithmetic.Types as Arithmetic
+import qualified Arithmetic.Lte as Lte
 import qualified Data.Array.Indexed as V
 import qualified Data.Index as Index
 import qualified Data.Primitive as PM
@@ -145,7 +145,7 @@ goOptionalSubfields !n !bufs !isFirsts !offs t = do
     (\_ (Const pkeyColonBrace) (ApConst1 r) -> do
       pushCommaBeforeSubfield n isFirsts bufs offs
       pushBytes pkeyColonBrace n bufs offs
-      Bool.set (Lt.plus @n (Lt.zero @0)) isFirsts Nat.zero n True
+      Bool.set Lte.reflexive isFirsts Nat.zero n True
       goOptionalRecord n bufs isFirsts offs r
       pushChar '}' n bufs offs
     )

@@ -18,7 +18,6 @@ import Data.Functor.Identity (Identity(..))
 import Data.Monoid (All(All))
 import Data.Primitive (Array,SmallArray)
 import Data.Array.Indexed (Vector)
-import Data.Array.Bool (MutableBoolVector)
 import Data.Word (Word16)
 import Data.STRef (STRef,writeSTRef,readSTRef,newSTRef)
 import Data.Index (Index(Index))
@@ -31,7 +30,7 @@ import Net.Types (IP(IP),IPv6(IPv6))
 import qualified Chronos
 import qualified Accordion.Ecs as Ecs
 import qualified Data.Index as Index
-import qualified Data.Arithmetic.Types as Arithmetic
+import qualified Arithmetic.Types as Arithmetic
 import qualified World.Bool as Bool
 import qualified Data.Array.Indexed as V
 import qualified Zeek.Json as Zeek

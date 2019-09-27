@@ -34,9 +34,9 @@ import Data.Type.Equality ((:~:)(Refl))
 import Accordion.World (VectorizeWorld)
 
 import qualified Data.Primitive as PM
-import qualified Data.Arithmetic.Nat as Nat
+import qualified Arithmetic.Nat as Nat
 import qualified Accordion.Ecs.Types as S
-import qualified Data.Arithmetic.Types as Arithmetic
+import qualified Arithmetic.Types as Arithmetic
 import qualified World.Bool as Bool
 import qualified GHC.TypeNats as GHC
 import qualified Accordion.Types as A
@@ -49,7 +49,7 @@ data Attributes = forall (n :: GHC.Nat) (m :: A.Meta S.FieldHeight S.PrefixHeigh
 
 instance Eq Attributes where
   Attributes n1 t1 a1 == Attributes n2 t2 a2 =
-    case Nat.equals n2 n1 of
+    case Nat.testEqual n2 n1 of
       Nothing -> False
       Just equal -> if Word64.equals n1 t1 (Word64.substitute equal t2)
         then equalsHetero n1 a1 (substitute equal a2)

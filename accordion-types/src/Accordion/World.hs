@@ -27,15 +27,10 @@ import Data.Word (Word8,Word16,Word32,Word64)
 import Data.Int (Int64)
 import Data.Functor.Identity (Identity(..))
 import Data.Array.Indexed (Vector)
-import Data.Array.Int (IntVector)
-import Data.Array.Char (CharVector)
-import Data.Array.Bool (BoolVector)
-import Data.Array.Word16 (Word16Vector)
-import Data.Array.Word64 (Word64Vector)
 import Data.Text.Short (ShortText)
 import Control.Monad.ST (runST)
 import GHC.TypeNats (type (+))
-import Data.Arithmetic.Types ((:=:),Nat)
+import Arithmetic.Types ((:=:),Nat)
 import Data.WideWord.Word128 (Word128)
 
 import qualified Data.Tuple.Types as Tuple
@@ -49,11 +44,11 @@ import qualified World.Word16 as Word16
 import qualified World.Word32 as Word32
 import qualified World.Word64 as Word64
 import qualified World.Word128 as Word128
-import qualified Data.Arithmetic.Types as Arithmetic
-import qualified Data.Arithmetic.Nat as Nat
-import qualified Data.Arithmetic.Lt as Lt
-import qualified Data.Arithmetic.Plus as Plus
-import qualified Data.Arithmetic.Equal as Equal
+import qualified Arithmetic.Types as Arithmetic
+import qualified Arithmetic.Nat as Nat
+import qualified Arithmetic.Lt as Lt
+import qualified Arithmetic.Plus as Plus
+import qualified Arithmetic.Equal as Equal
 
 data World
   = Bool

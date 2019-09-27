@@ -8,6 +8,7 @@ library deferred
   build-depends:
     , base >= 4.11.1 && < 5
     , accordion-types
+    , natural-arithmetic
     , indexed-array
     , indexed-unboxed-array
   exposed-modules: Deferred
@@ -37,6 +38,7 @@ library
     , accordion-types
     , accordion-base
     , accordion-json
+    , natural-arithmetic
     , indexed-array
     , zeek-json
     , primitive >=0.7 && <0.8
